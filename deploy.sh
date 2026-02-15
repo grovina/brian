@@ -18,78 +18,66 @@ for var in TELEGRAM_BOT_TOKEN TELEGRAM_OWNER_ID ANTHROPIC_API_KEY GITHUB_TOKEN; 
   fi
 done
 
-PROJECT="brian"
+VM="brian"
 ZONE="${GCE_ZONE:-europe-west1-b}"
 MACHINE_TYPE="${GCE_MACHINE_TYPE:-e2-small}"
 REPO="grovina/brian"
 
-# Update existing VM
-if gcloud compute instances describe "$PROJECT" --zone="$ZONE" &>/dev/null; then
-  echo "VM exists, updating..."
+SSH="gcloud compute ssh $VM --zone=$ZONE --command"
+SCP="gcloud compute scp --zone=$ZONE"
 
-  gcloud compute scp "$ENV_FILE" "$PROJECT:/tmp/brian.env" --zone="$ZONE"
-  gcloud compute ssh "$PROJECT" --zone="$ZONE" --command="
-    sudo mkdir -p /etc/brian &&
-    sudo mv /tmp/brian.env /etc/brian/env &&
-    sudo chmod 600 /etc/brian/env &&
-    cd /home/brian/app &&
-    sudo -u brian git pull origin main &&
-    sudo -u brian npm ci &&
-    sudo -u brian npm run build &&
-    sudo systemctl restart brian
-  "
+# Create VM if it doesn't exist
+if ! gcloud compute instances describe "$VM" --zone="$ZONE" &>/dev/null; then
+  echo "Creating VM..."
+  gcloud compute instances create "$VM" \
+    --zone="$ZONE" \
+    --machine-type="$MACHINE_TYPE" \
+    --image-family="debian-12" \
+    --image-project="debian-cloud" \
+    --scopes="https://www.googleapis.com/auth/cloud-platform" \
+    --tags="brian"
 
-  echo "Updated and restarted."
-  exit 0
+  echo "Waiting for SSH..."
+  for i in {1..30}; do
+    if $SSH "true" &>/dev/null; then break; fi
+    sleep 5
+  done
 fi
 
-# Create new VM
-echo "Creating VM..."
+echo "Installing system packages..."
+$SSH "
+  sudo apt-get update &&
+  sudo apt-get install -y curl git docker.io docker-compose-plugin build-essential &&
+  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash - &&
+  sudo apt-get install -y nodejs
+"
 
-gcloud compute instances create "$PROJECT" \
-  --zone="$ZONE" \
-  --machine-type="$MACHINE_TYPE" \
-  --image-family="debian-12" \
-  --image-project="debian-cloud" \
-  --scopes="https://www.googleapis.com/auth/cloud-platform" \
-  --tags="brian" \
-  --metadata=startup-script='#!/bin/bash
-    apt-get update
-    apt-get install -y curl git docker.io docker-compose-plugin build-essential
-    curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-    apt-get install -y nodejs
-    useradd -m -s /bin/bash brian
-    usermod -aG docker brian
-    systemctl enable docker
-    systemctl start docker
-  '
+echo "Setting up brian user..."
+$SSH "
+  id brian &>/dev/null || sudo useradd -m -s /bin/bash brian &&
+  sudo usermod -aG docker brian &&
+  sudo systemctl enable docker &&
+  sudo systemctl start docker
+"
 
-echo "Waiting for VM to be ready..."
-sleep 30
-
-for i in {1..60}; do
-  if gcloud compute ssh "$PROJECT" --zone="$ZONE" --command="which node" &>/dev/null; then
-    break
-  fi
-  echo "Waiting for setup to complete... ($i)"
-  sleep 10
-done
-
-echo "Setting up Brian..."
-
-# Copy .env to VM
-gcloud compute scp "$ENV_FILE" "$PROJECT:/tmp/brian.env" --zone="$ZONE"
-gcloud compute ssh "$PROJECT" --zone="$ZONE" --command="
+echo "Deploying environment..."
+$SCP "$ENV_FILE" "$VM:/tmp/brian.env"
+$SSH "
   sudo mkdir -p /etc/brian &&
   sudo mv /tmp/brian.env /etc/brian/env &&
   sudo chmod 600 /etc/brian/env
 "
 
-# Clone, build, install
-gcloud compute ssh "$PROJECT" --zone="$ZONE" --command="
+echo "Cloning and building..."
+$SSH "
   sudo -u brian bash -c '
-    git clone https://${GITHUB_TOKEN}@github.com/${REPO}.git /home/brian/app
-    cd /home/brian/app
+    set -e
+    if [ -d /home/brian/app ]; then
+      cd /home/brian/app && git pull origin main
+    else
+      git clone https://${GITHUB_TOKEN}@github.com/${REPO}.git /home/brian/app
+      cd /home/brian/app
+    fi
     npm ci
     npm run build
     mkdir -p /home/brian/secrets /home/brian/projects
@@ -98,17 +86,16 @@ gcloud compute ssh "$PROJECT" --zone="$ZONE" --command="
   '
 "
 
-# Install systemd service
-gcloud compute ssh "$PROJECT" --zone="$ZONE" --command="
-  sudo cp /home/brian/app/setup/brian.service /etc/systemd/system/brian.service
-  sudo systemctl daemon-reload
-  sudo systemctl enable brian
-  sudo systemctl start brian
+echo "Installing systemd service..."
+$SSH "
+  sudo cp /home/brian/app/setup/brian.service /etc/systemd/system/brian.service &&
+  sudo systemctl daemon-reload &&
+  sudo systemctl enable brian &&
+  sudo systemctl restart brian
 "
 
 echo "Waiting for Brian to come alive..."
 sleep 10
 
-gcloud compute ssh "$PROJECT" --zone="$ZONE" --command="systemctl is-active brian"
-
+$SSH "systemctl is-active brian"
 echo "Brian is running!"

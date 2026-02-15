@@ -28,8 +28,8 @@ export const config = {
     activeHoursEnd: optional("HEARTBEAT_ACTIVE_HOURS_END", "22:00"),
   },
   paths: {
-    workspace: new URL("../workspace", import.meta.url).pathname,
-    secrets: process.env.SECRETS_DIR || `${process.env.HOME}/secrets`,
-    projects: process.env.PROJECTS_DIR || `${process.env.HOME}/projects`,
+    workspace: optional("BRIAN_WORKSPACE", `${process.env.HOME}/.brian/workspace`),
+    secrets: optional("SECRETS_DIR", `${process.env.HOME}/secrets`),
+    projects: optional("PROJECTS_DIR", `${process.env.HOME}/projects`),
   },
 } as const;

@@ -81,8 +81,7 @@ export async function runAgent(userMessage: MessageContent): Promise<AgentResult
       const textBlocks = response.content.filter(
         (b): b is Anthropic.TextBlock => b.type === "text"
       );
-      const responseText =
-        textBlocks.map((b) => b.text).join("\n") || "(no response)";
+      const responseText = textBlocks.map((b) => b.text).join("\n");
       return { response: responseText, toolCalls };
     }
 
@@ -120,7 +119,7 @@ export async function runAgent(userMessage: MessageContent): Promise<AgentResult
       (b): b is Anthropic.TextBlock => b.type === "text"
     );
     return {
-      response: textBlocks.map((b) => b.text).join("\n") || "(no response)",
+      response: textBlocks.map((b) => b.text).join("\n"),
       toolCalls,
     };
   }

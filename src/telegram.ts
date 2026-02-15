@@ -55,6 +55,62 @@ bot.on("message:text", async (ctx) => {
   }
 });
 
+bot.on("message:photo", async (ctx) => {
+  if (!isOwner(ctx)) return;
+
+  try {
+    // Get the largest photo
+    const photo = ctx.message.photo[ctx.message.photo.length - 1];
+    const file = await ctx.getFile();
+    const filePath = file.file_path;
+    if (!filePath) {
+      await ctx.reply("Could not retrieve the image.");
+      return;
+    }
+
+    const url = `https://api.telegram.org/file/bot${config.telegram.botToken}/${filePath}`;
+    const response = await fetch(url);
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const base64 = buffer.toString("base64");
+
+    // Determine media type from file extension
+    const ext = path.extname(filePath).toLowerCase();
+    const mediaTypeMap: Record<string, string> = {
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".png": "image/png",
+      ".gif": "image/gif",
+      ".webp": "image/webp",
+    };
+    const mediaType = mediaTypeMap[ext] || "image/jpeg";
+
+    const caption = ctx.message.caption || "";
+    const content: Array<{type: string; text?: string; source?: any}> = [];
+    
+    if (caption) {
+      content.push({
+        type: "text",
+        text: caption,
+      });
+    }
+    
+    content.push({
+      type: "image",
+      source: {
+        type: "base64",
+        media_type: mediaType,
+        data: base64,
+      },
+    });
+
+    const result = await runAgent(content as any);
+    await sendLongMessage(ctx, result.response);
+  } catch (err) {
+    console.error("Image handling error:", err);
+    await ctx.reply(`Error handling image: ${(err as Error).message}`);
+  }
+});
+
 bot.on("message:document", async (ctx) => {
   if (!isOwner(ctx)) return;
 

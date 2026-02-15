@@ -57,7 +57,9 @@ export interface AgentResult {
   toolCalls: number;
 }
 
-export async function runAgent(userMessage: string): Promise<AgentResult> {
+export type MessageContent = string | Anthropic.MessageParam["content"];
+
+export async function runAgent(userMessage: MessageContent): Promise<AgentResult> {
   const systemPrompt = await buildSystemPrompt();
 
   conversationHistory.push({

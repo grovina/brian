@@ -9,7 +9,7 @@ const client = new Anthropic({ apiKey: config.anthropic.apiKey });
 
 const MAX_TURNS = 80;
 const MAX_RETRIES = 3;
-const MAX_HISTORY_MESSAGES = 200; // Keep last 200 messages like OpenClaw
+const MAX_HISTORY_MESSAGES = 200;
 const STATE_DIR = path.join(process.env.HOME || "/home/brian", ".brian");
 const STATE_FILE = path.join(STATE_DIR, "conversation-history.json");
 
@@ -22,18 +22,26 @@ interface ConversationState {
 
 let conversationHistory: Message[] = [];
 
+// Message queue to prevent concurrent processing
+interface QueuedMessage {
+  content: MessageContent;
+  resolve: (result: AgentResult) => void;
+  reject: (error: Error) => void;
+}
+
+let messageQueue: QueuedMessage[] = [];
+let isProcessing = false;
+
 async function loadConversationState(): Promise<void> {
   try {
     await fs.mkdir(STATE_DIR, { recursive: true });
     const data = await fs.readFile(STATE_FILE, "utf-8");
     const state: ConversationState = JSON.parse(data);
     
-    // Load last N messages only
     const recentMessages = state.messages.slice(-MAX_HISTORY_MESSAGES);
     conversationHistory.push(...recentMessages);
     console.log(`Restored ${recentMessages.length} recent messages from history`);
   } catch (err) {
-    // File doesn't exist or can't be read - start fresh
     console.log("Starting fresh conversation");
   }
 }
@@ -98,10 +106,7 @@ export interface AgentResult {
 
 export type MessageContent = string | Anthropic.MessageParam["content"];
 
-// Load state on module initialization
-loadConversationState().catch(console.error);
-
-export async function runAgent(userMessage: MessageContent): Promise<AgentResult> {
+async function processMessage(userMessage: MessageContent): Promise<AgentResult> {
   const systemPrompt = await buildSystemPrompt();
 
   conversationHistory.push({
@@ -157,7 +162,6 @@ export async function runAgent(userMessage: MessageContent): Promise<AgentResult
       continue;
     }
 
-    // Unexpected stop reason — return what we have
     const textBlocks = response.content.filter(
       (b): b is Anthropic.TextBlock => b.type === "text"
     );
@@ -173,6 +177,36 @@ export async function runAgent(userMessage: MessageContent): Promise<AgentResult
     response: "Reached maximum number of turns. The task may be incomplete.",
     toolCalls,
   };
+}
+
+async function processQueue(): Promise<void> {
+  while (messageQueue.length > 0) {
+    const queued = messageQueue.shift()!;
+    try {
+      const result = await processMessage(queued.content);
+      queued.resolve(result);
+    } catch (err) {
+      queued.reject(err as Error);
+    }
+  }
+  isProcessing = false;
+}
+
+// Load state on module initialization
+loadConversationState().catch(console.error);
+
+export async function runAgent(userMessage: MessageContent): Promise<AgentResult> {
+  return new Promise((resolve, reject) => {
+    messageQueue.push({ content: userMessage, resolve, reject });
+    
+    if (!isProcessing) {
+      isProcessing = true;
+      processQueue().catch(err => {
+        console.error("Queue processing error:", err);
+        isProcessing = false;
+      });
+    }
+  });
 }
 
 export async function clearConversation(): Promise<void> {

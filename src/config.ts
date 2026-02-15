@@ -1,3 +1,5 @@
+import { homedir } from "os";
+
 function required(name: string): string {
   const value = process.env[name];
   if (!value) {
@@ -9,6 +11,8 @@ function required(name: string): string {
 function optional(name: string, fallback: string): string {
   return process.env[name] || fallback;
 }
+
+const HOME = homedir();
 
 export const config = {
   telegram: {
@@ -28,8 +32,8 @@ export const config = {
     activeHoursEnd: optional("HEARTBEAT_ACTIVE_HOURS_END", "22:00"),
   },
   paths: {
-    workspace: optional("BRIAN_WORKSPACE", `${process.env.HOME}/.brian/workspace`),
-    secrets: optional("SECRETS_DIR", `${process.env.HOME}/secrets`),
-    projects: optional("PROJECTS_DIR", `${process.env.HOME}/projects`),
+    workspace: optional("BRIAN_WORKSPACE", `${HOME}/.brian/workspace`),
+    secrets: optional("SECRETS_DIR", `${HOME}/secrets`),
+    projects: optional("PROJECTS_DIR", `${HOME}/projects`),
   },
 } as const;

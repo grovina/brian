@@ -5,7 +5,7 @@ import { getToolDefinitions, getTool } from "./tools/index.js";
 
 const client = new Anthropic({ apiKey: config.anthropic.apiKey });
 
-const MAX_TURNS = 50;
+const MAX_TURNS = 80;
 const MAX_RETRIES = 3;
 
 type Message = Anthropic.MessageParam;

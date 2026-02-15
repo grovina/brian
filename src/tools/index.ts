@@ -7,7 +7,7 @@ import {
   memorySearchTool,
 } from "./memory.js";
 import { selfDeployTool } from "./self-deploy.js";
-import { searchCodeTool } from "./search-code.js";
+import { searchCodeTool } from "./search-files.js";
 
 export interface Tool {
   name: string;

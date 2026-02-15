@@ -2,9 +2,9 @@ import type { Tool } from "./index.js";
 import { Indexer } from "../indexer/indexer.js";
 
 export const searchCodeTool: Tool = {
-  name: "search_codebase",
+  name: "search_files",
   definition: {
-    name: "search_codebase",
+    name: "search_files",
     description: "Search the indexed codebase using semantic similarity. Returns relevant code chunks that match the query.",
     input_schema: {
       type: "object",

@@ -4,7 +4,7 @@ set -euo pipefail
 # Brian deployment script
 # Usage: ./deploy.sh --telegram-token "..." --anthropic-key "..." --github-token "..." --owner-telegram-id "..."
 
-PROJECT="brian-agent"
+PROJECT="grovina-brian"
 ZONE="europe-west1-b"
 MACHINE_TYPE="e2-small"
 IMAGE_FAMILY="debian-12"

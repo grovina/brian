@@ -6,7 +6,7 @@ console.log("Brian starting up...");
 startBot();
 startHeartbeat();
 
-sendMessageToOwner("✅ Online (MAX_TURNS=80, Claude Code available)").catch((err) => {
+sendMessageToOwner("hey! back online").catch((err) => {
   console.error("Failed to send startup message:", err);
 });
 

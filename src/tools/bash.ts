@@ -11,7 +11,10 @@ function exec(
   return new Promise((resolve, reject) => {
     const proc = spawn("bash", ["-c", command], {
       cwd: workingDirectory || process.cwd(),
-      env: process.env,
+      env: {
+        ...process.env,
+        PATH: `${process.env.HOME}/.npm-global/bin:${process.env.PATH}`,
+      },
       timeout: timeoutMs,
     });
 

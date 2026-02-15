@@ -1,17 +1,17 @@
 import type { Tool } from "./index.js";
 import { Indexer } from "../indexer/indexer.js";
 
-export const searchCodeTool: Tool = {
-  name: "search_files",
+export const searchTool: Tool = {
+  name: "search",
   definition: {
-    name: "search_files",
-    description: "Search the indexed codebase using semantic similarity. Returns relevant code chunks that match the query.",
+    name: "search",
+    description: "Search indexed content (files, docs, code, etc) using semantic similarity. Returns relevant chunks matching the query. Can be extended to include web search and external sources.",
     input_schema: {
       type: "object",
       properties: {
         query: {
           type: "string",
-          description: "The search query (natural language or code-related)",
+          description: "The search query (natural language)",
         },
         limit: {
           type: "number",

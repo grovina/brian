@@ -17,7 +17,7 @@ export const config = {
   },
   anthropic: {
     apiKey: required("ANTHROPIC_API_KEY"),
-    model: optional("BRIAN_MODEL", "claude-sonnet-4-20250514"),
+    model: optional("BRIAN_MODEL", "claude-sonnet-4-5"),
   },
   github: {
     token: optional("GITHUB_TOKEN", ""),

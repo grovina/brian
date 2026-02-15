@@ -1,68 +1,54 @@
-import { getLlama, resolveModelFile, LlamaModel, LlamaEmbeddingContext, LlamaLogLevel } from "node-llama-cpp";
-import { homedir } from "os";
-import path from "path";
+import { VoyageAIClient } from "voyageai";
 
-const MODEL_PATH = "hf:ggml-org/embeddinggemma-300m-qat-q8_0-GGUF/embeddinggemma-300m-qat-Q8_0.gguf";
-const MODEL_CACHE_DIR = path.join(homedir(), ".brian", "models");
+const VOYAGE_API_KEY = process.env.VOYAGE_API_KEY;
+const VOYAGE_MODEL = "voyage-3-lite"; // fast and cheap
 
-export class EmbeddingProvider {
-  private model: LlamaModel | null = null;
-  private context: LlamaEmbeddingContext | null = null;
+class VoyageEmbeddingProvider {
+  private client: VoyageAIClient;
+
+  constructor() {
+    if (!VOYAGE_API_KEY) {
+      throw new Error("VOYAGE_API_KEY environment variable required");
+    }
+    this.client = new VoyageAIClient({ apiKey: VOYAGE_API_KEY });
+  }
 
   async initialize(): Promise<void> {
-    if (this.context) return;
-
-    console.log("Initializing embedding model...");
-    const llama = await getLlama({ logLevel: LlamaLogLevel.error });
-    
-    console.log(`Resolving model: ${MODEL_PATH}`);
-    const modelPath = await resolveModelFile(MODEL_PATH, MODEL_CACHE_DIR);
-    
-    console.log(`Loading model from: ${modelPath}`);
-    this.model = await llama.loadModel({ modelPath });
-
-    console.log("Creating embedding context...");
-    this.context = await this.model.createEmbeddingContext();
-    console.log("Embedding model ready");
+    console.log("Using Voyage AI embeddings");
   }
 
   async embed(text: string): Promise<number[]> {
-    if (!this.context) {
-      await this.initialize();
+    const result = await this.client.embed({
+      input: text,
+      model: VOYAGE_MODEL,
+    });
+    if (!result.data?.[0]?.embedding) {
+      throw new Error("No embedding returned from Voyage");
     }
-
-    const result = await this.context!.getEmbeddingFor(text);
-    return this.normalize(Array.from(result.vector));
+    return result.data[0].embedding;
   }
 
   async embedBatch(texts: string[]): Promise<number[][]> {
-    if (!this.context) {
-      await this.initialize();
+    const result = await this.client.embed({
+      input: texts,
+      model: VOYAGE_MODEL,
+    });
+    if (!result.data) {
+      throw new Error("No embeddings returned from Voyage");
     }
-
-    const embeddings = await Promise.all(
-      texts.map(async (text) => {
-        const result = await this.context!.getEmbeddingFor(text);
-        return this.normalize(Array.from(result.vector));
-      })
-    );
-
-    return embeddings;
-  }
-
-  private normalize(vec: number[]): number[] {
-    const magnitude = Math.sqrt(vec.reduce((sum, val) => sum + val * val, 0));
-    if (magnitude < 1e-10) return vec;
-    return vec.map((val) => val / magnitude);
+    return result.data.map((d) => {
+      if (!d.embedding) throw new Error("Missing embedding in batch result");
+      return d.embedding;
+    });
   }
 }
 
 // Singleton instance
-let embeddingProvider: EmbeddingProvider | null = null;
+let embeddingProvider: VoyageEmbeddingProvider | null = null;
 
-export function getEmbeddingProvider(): EmbeddingProvider {
+export function getEmbeddingProvider(): VoyageEmbeddingProvider {
   if (!embeddingProvider) {
-    embeddingProvider = new EmbeddingProvider();
+    embeddingProvider = new VoyageEmbeddingProvider();
   }
   return embeddingProvider;
 }

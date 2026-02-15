@@ -61,7 +61,9 @@ $SSH "
   id brian &>/dev/null || sudo useradd -m -s /bin/bash brian &&
   sudo usermod -aG docker brian &&
   sudo systemctl enable docker &&
-  sudo systemctl start docker
+  sudo systemctl start docker &&
+  echo 'brian ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart brian, /usr/bin/systemctl stop brian, /usr/bin/systemctl start brian, /usr/bin/systemctl daemon-reload' | sudo tee /etc/sudoers.d/brian > /dev/null &&
+  sudo chmod 440 /etc/sudoers.d/brian
 "
 
 echo "Deploying environment..."

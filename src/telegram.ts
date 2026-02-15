@@ -61,7 +61,7 @@ bot.on("message:photo", async (ctx) => {
   try {
     // Get the largest photo
     const photo = ctx.message.photo[ctx.message.photo.length - 1];
-    const file = await ctx.getFile();
+    const file = await bot.api.getFile(photo.file_id);
     const filePath = file.file_path;
     if (!filePath) {
       await ctx.reply("Could not retrieve the image.");

@@ -6,9 +6,7 @@ console.log("Brian starting up...");
 startBot();
 startHeartbeat();
 
-sendMessageToOwner(
-  "Hello! I'm online. I have shell access, Docker, and git on this machine. I don't know anything about your projects yet — tell me what to work on or send me files I'll need."
-).catch((err) => {
+sendMessageToOwner("✅ Online (MAX_TURNS=80, Claude Code available)").catch((err) => {
   console.error("Failed to send startup message:", err);
 });
 

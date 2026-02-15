@@ -47,9 +47,13 @@ fi
 echo "Installing system packages..."
 $SSH "
   sudo apt-get update &&
-  sudo apt-get install -y curl git docker.io docker-compose-plugin build-essential &&
+  sudo apt-get install -y curl git build-essential ca-certificates gnupg &&
+  sudo install -m 0755 -d /etc/apt/keyrings &&
+  curl -fsSL https://download.docker.com/linux/debian/gpg | sudo gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg &&
+  echo 'deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian bookworm stable' | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null &&
   curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash - &&
-  sudo apt-get install -y nodejs
+  sudo apt-get update &&
+  sudo apt-get install -y nodejs docker-ce docker-ce-cli containerd.io docker-compose-plugin
 "
 
 echo "Setting up brian user..."

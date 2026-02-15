@@ -72,14 +72,25 @@ $SSH "
   sudo chmod 600 /etc/brian/env
 "
 
+echo "Configuring git..."
+$SSH "
+  sudo -u brian git config --global user.name 'Brian' &&
+  sudo -u brian git config --global user.email 'brian@grovina.com' &&
+  sudo -u brian git config --global credential.helper store &&
+  echo 'https://x-access-token:${GITHUB_TOKEN}@github.com' | sudo -u brian tee /home/brian/.git-credentials > /dev/null &&
+  sudo chmod 600 /home/brian/.git-credentials
+"
+
 echo "Cloning and building..."
 $SSH "
   sudo -u brian bash -c '
     set -e
     if [ -d /home/brian/app ]; then
-      cd /home/brian/app && git pull origin main
+      cd /home/brian/app
+      git remote set-url origin https://github.com/${REPO}.git
+      git pull origin main
     else
-      git clone https://${GITHUB_TOKEN}@github.com/${REPO}.git /home/brian/app
+      git clone https://github.com/${REPO}.git /home/brian/app
       cd /home/brian/app
     fi
     npm ci

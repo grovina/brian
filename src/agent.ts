@@ -9,9 +9,9 @@ const client = new Anthropic({ apiKey: config.anthropic.apiKey });
 
 const MAX_TURNS = 80;
 const MAX_RETRIES = 3;
+const MAX_HISTORY_MESSAGES = 200; // Keep last 200 messages like OpenClaw
 const STATE_DIR = path.join(process.env.HOME || "/home/brian", ".brian");
-const STATE_FILE = path.join(STATE_DIR, "conversation-state.json");
-const MAX_HISTORY_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+const STATE_FILE = path.join(STATE_DIR, "conversation-history.json");
 
 type Message = Anthropic.MessageParam;
 
@@ -20,7 +20,7 @@ interface ConversationState {
   lastActivity: number;
 }
 
-const conversationHistory: Message[] = [];
+let conversationHistory: Message[] = [];
 
 async function loadConversationState(): Promise<void> {
   try {
@@ -28,15 +28,10 @@ async function loadConversationState(): Promise<void> {
     const data = await fs.readFile(STATE_FILE, "utf-8");
     const state: ConversationState = JSON.parse(data);
     
-    // Check if state is too old
-    const age = Date.now() - state.lastActivity;
-    if (age > MAX_HISTORY_AGE_MS) {
-      console.log("Conversation state expired, starting fresh");
-      return;
-    }
-    
-    conversationHistory.push(...state.messages);
-    console.log(`Restored ${state.messages.length} messages from previous conversation`);
+    // Load last N messages only
+    const recentMessages = state.messages.slice(-MAX_HISTORY_MESSAGES);
+    conversationHistory.push(...recentMessages);
+    console.log(`Restored ${recentMessages.length} recent messages from history`);
   } catch (err) {
     // File doesn't exist or can't be read - start fresh
     console.log("Starting fresh conversation");

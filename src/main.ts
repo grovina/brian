@@ -1,3 +1,4 @@
+import "./logger.js"; // Initialize logging first
 import { startBot, stopBot, sendMessageToOwner } from "./telegram.js";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat.js";
 

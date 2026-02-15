@@ -7,6 +7,7 @@ import {
   memorySearchTool,
 } from "./memory.js";
 import { selfDeployTool } from "./self-deploy.js";
+import { logsTool } from "./logs.js";
 
 export interface Tool {
   name: string;
@@ -23,6 +24,7 @@ const allTools: Tool[] = [
   memoryWriteTool,
   memorySearchTool,
   selfDeployTool,
+  logsTool,
 ];
 
 const toolMap = new Map(allTools.map((t) => [t.name, t]));

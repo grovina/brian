@@ -46,6 +46,8 @@ async function sendLongMessage(ctx: Context, text: string): Promise<void> {
 bot.on("message:text", async (ctx) => {
   if (!isOwner(ctx)) return;
 
+  console.log("[Telegram] Received text message:", ctx.message.text.substring(0, 100));
+  
   try {
     const result = await runAgent(ctx.message.text);
     await sendLongMessage(ctx, result.response);
@@ -58,11 +60,18 @@ bot.on("message:text", async (ctx) => {
 bot.on("message:photo", async (ctx) => {
   if (!isOwner(ctx)) return;
 
+  console.log("[Telegram] Received photo message. Photos count:", ctx.message.photo.length);
+  console.log("[Telegram] Caption:", ctx.message.caption || "(none)");
+
   try {
     // Get the largest photo
     const photo = ctx.message.photo[ctx.message.photo.length - 1];
+    console.log("[Telegram] Selected photo file_id:", photo.file_id, "size:", photo.file_size);
+    
     const file = await bot.api.getFile(photo.file_id);
     const filePath = file.file_path;
+    console.log("[Telegram] Photo file path:", filePath);
+    
     if (!filePath) {
       await ctx.reply("Could not retrieve the image.");
       return;
@@ -72,6 +81,7 @@ bot.on("message:photo", async (ctx) => {
     const response = await fetch(url);
     const buffer = Buffer.from(await response.arrayBuffer());
     const base64 = buffer.toString("base64");
+    console.log("[Telegram] Downloaded image, base64 length:", base64.length);
 
     // Determine media type from file extension
     const ext = path.extname(filePath).toLowerCase();
@@ -83,6 +93,7 @@ bot.on("message:photo", async (ctx) => {
       ".webp": "image/webp",
     };
     const mediaType = mediaTypeMap[ext] || "image/jpeg";
+    console.log("[Telegram] Media type:", mediaType);
 
     const caption = ctx.message.caption || "";
     const content: Array<{type: string; text?: string; source?: any}> = [];
@@ -103,6 +114,7 @@ bot.on("message:photo", async (ctx) => {
       },
     });
 
+    console.log("[Telegram] Sending to agent with", content.length, "content blocks");
     const result = await runAgent(content as any);
     await sendLongMessage(ctx, result.response);
   } catch (err) {
@@ -113,6 +125,8 @@ bot.on("message:photo", async (ctx) => {
 
 bot.on("message:document", async (ctx) => {
   if (!isOwner(ctx)) return;
+
+  console.log("[Telegram] Received document:", ctx.message.document.file_name);
 
   try {
     const file = await ctx.getFile();
@@ -141,6 +155,8 @@ bot.on("message:document", async (ctx) => {
 
     await fs.mkdir(path.dirname(savePath), { recursive: true });
     await fs.writeFile(savePath, buffer);
+
+    console.log("[Telegram] Saved document to:", savePath);
 
     // Let the agent know about the file
     const message = `File received and saved to ${savePath}${caption ? ` (caption: "${caption}")` : ""}`;

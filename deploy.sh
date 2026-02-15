@@ -18,7 +18,7 @@ for var in TELEGRAM_BOT_TOKEN TELEGRAM_OWNER_ID ANTHROPIC_API_KEY GITHUB_TOKEN; 
   fi
 done
 
-PROJECT="grovina-brian"
+PROJECT="brian"
 ZONE="${GCE_ZONE:-europe-west1-b}"
 MACHINE_TYPE="${GCE_MACHINE_TYPE:-e2-small}"
 REPO="grovina/brian"

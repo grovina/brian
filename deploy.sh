@@ -20,7 +20,13 @@ done
 
 VM="brian"
 ZONE="${GCE_ZONE:-europe-west1-b}"
-MACHINE_TYPE="${GCE_MACHINE_TYPE:-e2-small}"
+# Upgraded to n2-standard-4 for local LLM support:
+# - 4 vCPUs (needed for llama 70b inference)
+# - 16 GB RAM (minimum for 70b quantized models)
+# - 50 GB disk (for models + data)
+# Cost: ~$140/month (can use preemptible for ~$42/month if acceptable)
+MACHINE_TYPE="${GCE_MACHINE_TYPE:-n2-standard-4}"
+BOOT_DISK_SIZE="${GCE_BOOT_DISK_SIZE:-50GB}"
 REPO="grovina/brian"
 
 SSH="gcloud compute ssh $VM --zone=$ZONE --command"
@@ -29,13 +35,19 @@ SCP="gcloud compute scp --zone=$ZONE"
 # Create VM if it doesn't exist
 if ! gcloud compute instances describe "$VM" --zone="$ZONE" &>/dev/null; then
   echo "Creating VM..."
+  echo "Machine type: $MACHINE_TYPE (4 vCPU, 16GB RAM)"
+  echo "Disk size: $BOOT_DISK_SIZE"
+  echo "Estimated cost: ~$140/month (standard) or ~$42/month (preemptible)"
+  
   gcloud compute instances create "$VM" \
     --zone="$ZONE" \
     --machine-type="$MACHINE_TYPE" \
+    --boot-disk-size="$BOOT_DISK_SIZE" \
     --image-family="debian-12" \
     --image-project="debian-cloud" \
     --scopes="https://www.googleapis.com/auth/cloud-platform" \
     --tags="brian"
+    # Add --preemptible flag for 70% cost savings (VM may be terminated)
 
   echo "Waiting for SSH..."
   for i in {1..30}; do
@@ -116,3 +128,8 @@ sleep 10
 
 $SSH "systemctl is-active brian"
 echo "Brian is running!"
+echo ""
+echo "Next steps:"
+echo "1. Install Ollama in Docker: docker run -d --name ollama -p 11434:11434 -v ollama:/root/.ollama ollama/ollama"
+echo "2. Pull model: docker exec ollama ollama pull llama3.3:70b-instruct-q4_K_M"
+echo "3. Model will be ~40GB, fits in 16GB RAM when quantized"

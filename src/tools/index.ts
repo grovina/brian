@@ -9,10 +9,12 @@ import {
 import { selfDeployTool } from "./self-deploy.js";
 import { slackReadTool, slackPostTool } from "./slack.js";
 
+export type ToolResult = string | Anthropic.ToolResultBlockParam["content"];
+
 export interface Tool {
   name: string;
   definition: Anthropic.Tool;
-  execute(input: Record<string, unknown>): Promise<string>;
+  execute(input: Record<string, unknown>): Promise<ToolResult>;
 }
 
 const allTools: Tool[] = [

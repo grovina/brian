@@ -1,10 +1,13 @@
+import Anthropic from "@anthropic-ai/sdk";
 import {
   fetchMessages,
   sendMessage,
   resolveUser,
   formatMessage,
+  downloadImage,
+  hasImages,
 } from "../slack.js";
-import type { Tool } from "./index.js";
+import type { Tool, ToolResult } from "./index.js";
 
 export const slackReadTool: Tool = {
   name: "slack_read",
@@ -28,24 +31,47 @@ export const slackReadTool: Tool = {
       required: [],
     },
   },
-  async execute(input) {
+  async execute(input): Promise<ToolResult> {
     const { oldest, limit } = input as { oldest?: string; limit?: number };
     const messages = await fetchMessages({ oldest, limit });
 
     if (messages.length === 0) return "No messages.";
 
-    const lines: string[] = [];
+    const latestTs = messages[messages.length - 1].ts;
+
+    // Build rich content blocks (text + images)
+    const blocks: Anthropic.ToolResultBlockParam["content"] = [];
+    const textLines: string[] = [];
+
     for (const msg of messages) {
       const userName = msg.user
         ? await resolveUser(msg.user)
         : msg.username || "bot";
-      lines.push(formatMessage(msg, userName));
+      textLines.push(formatMessage(msg, userName));
+
+      // Download and attach images inline
+      if (hasImages(msg)) {
+        for (const file of msg.files ?? []) {
+          if (!(file.mimetype in { "image/jpeg": 1, "image/jpg": 1, "image/png": 1, "image/gif": 1, "image/webp": 1 })) continue;
+          const image = await downloadImage(file.url_private);
+          if (image) {
+            blocks.push({
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: image.mediaType,
+                data: image.data,
+              },
+            } as Anthropic.ImageBlockParam);
+          }
+        }
+      }
     }
 
-    const latestTs = messages[messages.length - 1].ts;
-    lines.push(`\n(latest message ts: ${latestTs})`);
+    textLines.push(`\n(latest message ts: ${latestTs})`);
+    blocks.unshift({ type: "text", text: textLines.join("\n") });
 
-    return lines.join("\n");
+    return blocks;
   },
 };
 

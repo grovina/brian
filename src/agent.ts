@@ -81,7 +81,7 @@ async function callLLM(
 async function executeTool(
   toolName: string,
   toolInput: Record<string, unknown>
-): Promise<string> {
+): Promise<Anthropic.ToolResultBlockParam["content"]> {
   if (toolName.includes("__")) {
     return await mcpManager.executeTool(toolName, toolInput);
   }

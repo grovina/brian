@@ -19,14 +19,42 @@ type Message = Anthropic.MessageParam;
 
 let conversationHistory: Message[] = [];
 
+function sanitizeHistory(messages: Message[]): Message[] {
+  // Trim leading messages until we find a user message with text content.
+  // History truncation can orphan tool_result blocks whose matching
+  // tool_use was in a now-trimmed assistant message.
+  let start = 0;
+  while (start < messages.length) {
+    const msg = messages[start];
+    if (msg.role !== "user") {
+      start++;
+      continue;
+    }
+    if (
+      Array.isArray(msg.content) &&
+      msg.content.some((b: any) => b.type === "tool_result")
+    ) {
+      start++;
+      continue;
+    }
+    if (msg.content === "" || (Array.isArray(msg.content) && msg.content.length === 0)) {
+      start++;
+      continue;
+    }
+    break;
+  }
+  return messages.slice(start);
+}
+
 async function loadConversationState(): Promise<void> {
   try {
     await fs.mkdir(STATE_DIR, { recursive: true });
     const data = await fs.readFile(STATE_FILE, "utf-8");
     const state = JSON.parse(data);
-    const recentMessages = state.messages.slice(-MAX_HISTORY_MESSAGES);
-    conversationHistory.push(...recentMessages);
-    console.log(`Restored ${recentMessages.length} messages from history`);
+    const trimmed = state.messages.slice(-MAX_HISTORY_MESSAGES);
+    const clean = sanitizeHistory(trimmed);
+    conversationHistory.push(...clean);
+    console.log(`Restored ${clean.length} messages from history (${trimmed.length - clean.length} orphaned messages trimmed)`);
   } catch {
     console.log("Starting fresh conversation");
   }

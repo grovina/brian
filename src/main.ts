@@ -3,11 +3,13 @@ import { config } from "./config.js";
 import { runAgent } from "./agent.js";
 import { getNewMessages, postMessage } from "./slack.js";
 import { readHeartbeat } from "./memory.js";
+import { mcpManager } from "./mcp-client.js";
 import fs from "fs/promises";
 import path from "path";
 
 const STATE_DIR = path.join(process.env.HOME || "/home/brian", ".brian");
 const TS_FILE = path.join(STATE_DIR, "last-slack-ts");
+const MCP_CONFIG_FILE = path.join(STATE_DIR, "mcp-servers.json");
 
 async function loadLastTs(): Promise<string> {
   try {
@@ -20,6 +22,26 @@ async function loadLastTs(): Promise<string> {
 async function saveLastTs(ts: string): Promise<void> {
   await fs.mkdir(STATE_DIR, { recursive: true });
   await fs.writeFile(TS_FILE, ts);
+}
+
+async function loadMCPServers(): Promise<void> {
+  try {
+    const configData = await fs.readFile(MCP_CONFIG_FILE, "utf-8");
+    const config = JSON.parse(configData);
+    
+    if (config.servers && Array.isArray(config.servers)) {
+      for (const server of config.servers) {
+        await mcpManager.addServer(server);
+      }
+      console.log(`Loaded ${config.servers.length} MCP server(s)`);
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      console.log("No MCP servers configured (create ~/.brian/mcp-servers.json to add)");
+    } else {
+      console.error("Failed to load MCP servers:", err);
+    }
+  }
 }
 
 function isWithinActiveHours(): boolean {
@@ -75,7 +97,14 @@ async function loop(): Promise<void> {
 }
 
 console.log(`${config.name} starting up...`);
+await loadMCPServers();
 loop();
 
-process.on("SIGINT", () => process.exit(0));
-process.on("SIGTERM", () => process.exit(0));
+process.on("SIGINT", async () => {
+  await mcpManager.close();
+  process.exit(0);
+});
+process.on("SIGTERM", async () => {
+  await mcpManager.close();
+  process.exit(0);
+});

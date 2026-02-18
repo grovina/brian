@@ -4,6 +4,7 @@ import path from "path";
 import { config } from "./config.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import { getToolDefinitions, getTool } from "./tools/index.js";
+import { mcpManager } from "./mcp-client.js";
 import { todayLogPath } from "./memory.js";
 
 const client = new Anthropic({ apiKey: config.anthropic.apiKey });
@@ -50,11 +51,14 @@ async function callLLM(
   let lastError: Error | null = null;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
+      // Combine native tools with MCP tools
+      const allTools = [...getToolDefinitions(), ...mcpManager.getToolDefinitions()];
+      
       return await client.messages.create({
         model: config.anthropic.model,
         max_tokens: 16384,
         system: systemPrompt,
-        tools: getToolDefinitions(),
+        tools: allTools,
         messages,
       });
     } catch (err) {
@@ -72,6 +76,12 @@ async function executeTool(
   toolName: string,
   toolInput: Record<string, unknown>
 ): Promise<string> {
+  // Check if it's an MCP tool (prefixed with server name)
+  if (toolName.includes("__")) {
+    return await mcpManager.executeTool(toolName, toolInput);
+  }
+  
+  // Native tool
   const tool = getTool(toolName);
   if (!tool) return `Unknown tool: ${toolName}`;
   try {

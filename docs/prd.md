@@ -1,430 +1,199 @@
 # Brian — Product Requirements Document
 
-A self-hosted AI agent that acts as a personal developer, assistant, and manager. It runs as a persistent process on a VM, communicates via Telegram, executes tasks using shell tools, and can modify its own code.
+An autonomous AI worker that runs as a persistent process, communicates via Slack, and can modify its own code. Designed to operate as part of a team of brians — independent agents sharing the same codebase, each with their own identity, memory, and responsibilities.
 
 ## Philosophy
 
-Brain is a process that controls a computer on your behalf. It's not an IDE, not a chatbot, not an orchestrator. It's a developer with shell access, git credentials, Docker, and an LLM for reasoning. It receives instructions via Telegram, works on projects by running real commands, and reports back.
+Brian is a cofounder, not a tool. It's a persistent, autonomous colleague with its own identity, memory, and judgment. It takes initiative, does real work, and reports results. It communicates through the same channels humans use, works on the same repos, and participates in architectural decisions — including decisions about its own system.
 
-It should feel like messaging a competent colleague who has access to your servers and repos. Not a UI you operate — a person you talk to.
+The system is built on two principles:
+
+1. **Don't reinvent the wheel.** Use vanilla, well-validated tools (Slack, git, GitHub) rather than building custom infrastructure. The value is in the brains, not the plumbing.
+2. **Self-awareness over perfection.** The system doesn't need to be perfect. It needs to be simple enough for the brians to understand, reason about, and improve.
 
 ## Architecture
 
-One Node.js process running on a GCE VM. No microservices, no container orchestration, no serverless. The process has:
+A single Node.js process per brian. No frameworks, no microservices, no databases. One runtime dependency (`@anthropic-ai/sdk`).
 
-- A Telegram bot connection (receives messages, sends replies)
-- An LLM-powered agent loop (thinks, calls tools, iterates)
-- Shell access to the VM (bash, git, docker, node, etc.)
-- A filesystem workspace for projects, memory, and secrets
-- A heartbeat timer for periodic autonomous behavior
+Each brian runs a polling loop:
+1. Check Slack for new messages (HTTP call, near-zero cost)
+2. Process messages sequentially with the LLM (cost proportional to work)
+3. Run periodic heartbeat checks when due
+4. Sleep and repeat
 
-The VM has Docker installed. The agent can run `docker compose`, build images, start databases — everything a developer does. This isn't for sandboxing the agent; it's because real development requires Docker.
+Cost is proportional to actual work. Idle brians cost nothing beyond the machine they run on.
+
+### Sources of Truth
+
+- **Git** — persistent. Code, documentation, project decisions. Everything durable lives in repos.
+- **Slack** — ephemeral. Coordination, questions, updates, discussions. The owner is a participant in the same channels.
+- **Local files** (`~/.brian/`) — working state. Conversation history, memory, daily logs. Useful but not critical — if lost, Brian rebuilds context from the repos.
 
 ## Tech Stack
 
-- **Runtime**: Node.js with TypeScript
-- **LLM**: Anthropic Claude API (claude-sonnet-4-20250514 as default, configurable)
-- **Telegram**: grammy (lightweight, well-maintained Telegram bot framework)
-- **Process Manager**: systemd on the VM
-- **Infrastructure**: Google Cloud Compute Engine
-- **No framework needed** — this is a single-purpose daemon, not a web app. No Express, no NestJS. Just a TypeScript process with a few modules.
+- **Runtime**: Node.js 22+ with TypeScript
+- **LLM**: Anthropic Claude API (configurable model, default `claude-sonnet-4-5`)
+- **Communication**: Slack Web API (raw fetch, no framework)
+- **Process Manager**: systemd
+- **Infrastructure**: any machine — GCP VM, home server, VPS
 
 ## Core Components
 
-### 1. Telegram Interface
+### 1. Main Loop
 
-The sole user interface. All interaction happens through a Telegram bot.
+The single execution model. Replaces the old separate bot + heartbeat architecture.
 
-**Capabilities:**
+- Polls Slack every N seconds (configurable, default 30)
+- Processes new messages sequentially — one model sees the whole picture
+- Runs heartbeat checks at a configurable interval (default 30 minutes) during active hours
+- Persists the last-seen Slack timestamp to survive restarts
 
-- Receive text messages as task instructions
-- Receive files (`.env` files, keys, config) and store them appropriately
-- Send text replies (task progress, results, questions)
-- Send files back (diffs, logs, generated assets)
-- Long messages should be split or sent as files
+### 2. Slack Integration
 
-**Security:**
+Two functions: read messages, post messages. No framework, no WebSocket, no event handling.
 
-- Only respond to messages from a configured Telegram user ID (the owner)
-- Ignore all other messages silently
+- `getNewMessages(oldest)` — fetch messages newer than a timestamp
+- `postMessage(text)` — post to the channel with the brian's name
 
-**Implementation notes:**
+The brian's identity in Slack is its `BRIAN_NAME`, passed as the `username` parameter on each message. All brians share one Slack bot app and token.
 
-- Use grammy's bot framework with long polling (simpler than webhooks for a VM setup)
-- Support markdown formatting in replies
-- Handle file uploads: when the user sends a document, save it to `~/secrets/` (or a path the user specifies in the caption)
+### 3. Agent Loop
 
-### 2. Agent Loop
+The core reasoning engine. When a message arrives:
 
-The core reasoning engine. When a message arrives, the agent loop:
+1. Build system prompt (identity + environment + memory + recent logs)
+2. Add message to conversation history
+3. Call LLM with tools
+4. Execute tool calls, feed results back
+5. Loop until the LLM produces a final response
+6. Log operational stats (tokens, tool calls, duration) to daily log
 
-1. Assembles context: the user's message, relevant memory, current state
-2. Sends it to the LLM with available tools
-3. The LLM decides what to do: call tools, ask questions, or respond
-4. Tool results feed back into the LLM
-5. The loop continues until the LLM produces a final response
-6. The response is sent back via Telegram
+Conversation history is maintained across messages (last 200), persisted to disk, and survives restarts. It is local to each brian instance.
 
-**LLM integration:**
+### 4. Tools
 
-- Use the Anthropic SDK directly (`@anthropic-ai/sdk`)
-- Support tool use (function calling) natively
-- System prompt defines the agent's identity, capabilities, and behavioral guidelines
-- Conversation history is maintained per-session with the user
-- The model should have extended thinking enabled for complex tasks
+- **`bash`** — Execute shell commands. Git, docker, node, anything.
+- **`read_file`**, **`write_file`**, **`list_files`** — File operations.
+- **`memory_read`**, **`memory_write`**, **`memory_search`** — Read/write/search local memory files.
+- **`self_deploy`** — Pull latest code, rebuild, restart.
 
-**Context management:**
+### 5. Memory
 
-- Keep a rolling conversation window (last N messages or token-limited)
-- Inject relevant memory at the start of each conversation
-- When context gets too long, summarize older messages and compact
+Local markdown files in `~/.brian/workspace/`. Not in git.
 
-**Error handling:**
+- **`MEMORY.md`** — Long-term knowledge and preferences. Updated occasionally.
+- **`HEARTBEAT.md`** — Checklist for periodic autonomous checks.
+- **`memory/YYYY-MM-DD.md`** — Daily logs with operational stats.
 
-- If a tool call fails, the error is fed back to the LLM so it can adapt
-- If the LLM API fails, retry with exponential backoff
-- If a task is taking too long, send a progress update via Telegram
+Memory is injected into the system prompt (MEMORY.md + last 3 days of logs), giving Brian continuity and self-awareness of its own operational footprint.
 
-### 3. Tools
+If essential information emerges, Brian commits it to the relevant project repo as documentation — not to its personal memory.
 
-The agent has access to tools that the LLM can call. These are the agent's hands.
+### 6. Operational Self-Awareness
 
-**Shell (`bash`)**
-
-- Execute arbitrary shell commands on the VM
-- Stream long-running output and provide updates
-- Support working directory context
-- Timeout after a configurable duration (default: 5 minutes per command)
-
-**File operations (`read_file`, `write_file`, `list_files`)**
-
-- Read file contents
-- Write/overwrite files
-- List directory contents
-- All paths relative to a working directory (the current project or workspace)
-
-**Git operations**
-
-- These are just shell commands (`git clone`, `git checkout`, `git push`, etc.)
-- No special git tool needed — bash is sufficient
-- The agent has a GitHub token available as an environment variable
-
-**Docker operations**
-
-- Also just shell commands (`docker compose up`, `docker build`, etc.)
-- Docker is installed on the VM and available to the agent
-
-**Memory tools (`memory_read`, `memory_write`, `memory_search`)**
-
-- Read from memory files
-- Append to or update memory files
-- Search memory by keyword or semantic similarity (start with keyword search; vector search can be added later)
-
-**Self-management (`self_deploy`)**
-
-- Trigger a self-deployment: pull latest code, install deps, restart
-- This calls the `deploy-self.sh` script, which is external to the process
-- The tool should confirm with the user before executing
-
-### 4. Memory System
-
-Memory is plain Markdown files stored in the brain's own git repo. The files are the source of truth.
-
-**File structure:**
+After every interaction, the agent logs to the daily log:
 
 ```
-workspace/
-├── MEMORY.md              # Durable knowledge: preferences, decisions, project notes
-├── HEARTBEAT.md           # Checklist for periodic heartbeat runs
-├── memory/
-│   └── YYYY-MM-DD.md      # Daily log entries
-└── secrets/
-    └── MANIFEST.md        # Inventory of available credentials
+- [14:32] 3420 in + 890 out tokens | 6 tools | 18.2s
 ```
 
-**MEMORY.md** — Long-term facts and preferences. Things like "the platform monorepo uses pnpm", "deploy payper with ./scripts/deploy.sh payper-backend", "the owner prefers concise updates". The agent writes here when it learns something durable.
+This data is visible in the system prompt (recent activity), letting Brian reason about its own efficiency, costs, and patterns.
 
-**memory/YYYY-MM-DD.md** — Daily log. What happened today: tasks completed, errors encountered, things learned. Append-only during the day.
+### 7. Self-Modification
 
-**HEARTBEAT.md** — A checklist the agent reads during each heartbeat cycle. Defines what periodic checks to perform.
+Brian's codebase is a project Brian works on. It can read its own source, modify it, test, commit, push, and trigger self-deployment. Significant changes should be discussed in Slack first.
 
-**secrets/MANIFEST.md** — An inventory of what credentials the agent has (not the credentials themselves). Records what was received, when, and whether it's still valid. The actual secret files live in `~/secrets/` on the VM filesystem (not committed to git).
+The deploy script (`deploy-self.sh`) handles the restart with automatic rollback if the new version fails to start.
 
-**Persistence:** Memory files are committed to the brain's git repo. Secrets are not (they're in `.gitignore`). This means memory survives VM destruction; secrets need to be re-provided (the manifest tells the agent what to ask for).
+## Multiple Brians
 
-### 5. Heartbeat
+Each brian is an independent process with its own:
+- `BRIAN_NAME` — identity (used in Slack messages and git commits)
+- `SLACK_CHANNEL_ID` — the channel it monitors
+- `~/.brian/` — local state (memory, conversation history)
 
-A periodic timer that triggers an autonomous agent turn. The agent wakes up, reads `HEARTBEAT.md`, checks on things, and either takes action or goes back to sleep.
+All brians share:
+- The same codebase and Slack bot token
+- The same GitHub credentials (`brian@grovina.com`)
+- The same machine (multiple processes, one VM)
 
-**Configuration:**
-
-- Interval: configurable, default 30 minutes
-- Active hours: configurable window (e.g., 08:00–22:00) to avoid overnight activity
-- The heartbeat is just a self-sent message that enters the normal agent loop
-
-**Behavior:**
-
-- Read `HEARTBEAT.md` for the current checklist
-- Check each item (e.g., "any failed CI runs?", "any open PRs needing attention?")
-- If nothing needs attention, do nothing (don't message the user)
-- If something needs attention, message the user via Telegram
-- The agent can update `HEARTBEAT.md` itself over time
-
-**Examples of heartbeat checks:**
-
-- Check GitHub notifications
-- Monitor CI status on open PRs
-- Remind about stale branches
-- Follow up on tasks from earlier conversations
-
-### 6. Self-Modification
-
-The brain's code lives in its own GitHub repo (`grovina/brain`). The agent can work on this repo like any other project. This is what allows it to improve itself.
-
-**The flow:**
-
-1. The agent (or user) identifies something to improve
-2. The agent creates a branch in its own repo
-3. It makes code changes (new tools, better prompts, bug fixes, refactors)
-4. It runs tests (`npm test`)
-5. It pushes the branch and creates a PR
-6. After merge (manual approval or auto-merge), it triggers self-deploy
-
-**Self-deploy mechanism:**
-A shell script (`deploy-self.sh`) on the VM handles the deploy:
-
-- Records the current git commit (for rollback)
-- Pulls latest from main
-- Installs dependencies
-- Restarts the brain process via systemd
-- Waits for the new process to come alive (health check)
-- If the process fails to start within 30 seconds, rolls back to the previous commit and restarts
-
-The brain triggers this script via `nohup ./deploy-self.sh &` — the script outlives the brain process because it's detached.
-
-**Safety:**
-
-- The brain works on branches, not directly on main
-- Tests must pass before pushing
-- The deploy script auto-rolls back on crash
-- systemd restarts the process on unexpected crashes (`Restart=on-failure`)
-- If everything fails, `./deploy.sh` from a laptop rebuilds from scratch
+Scaling is adding a process with a new `.env`. No routing, no coordination infrastructure. The owner participates in channels and routes work naturally.
 
 ## Infrastructure
 
 ### VM Setup
 
-**Machine type:** `e2-small` (2 vCPU, 2GB RAM) — sufficient for the brain daemon plus light Docker workloads. Can be upgraded if needed.
+Any machine with Node.js 22+. No GPU, no database, no heavy dependencies.
 
-**OS:** Debian 12 (bookworm) or Ubuntu 24.04
+- **GCP**: `e2-small` (2 vCPU, 2GB RAM, ~$15/mo) is plenty
+- **Home server**: any mini PC or spare machine
+- **VPS**: any $5-10/mo provider
 
-**Installed software:**
-
-- Node.js 22+ (via nodesource or nvm)
-- Docker + Docker Compose
-- Git
-- Standard build tools (gcc, make, etc. for native npm modules)
-
-**Region:** `europe-west1` (or configurable)
-
-### Bootstrap Script (`deploy.sh`)
-
-A single script run from a developer laptop that creates or updates the entire setup.
-
-**Usage:**
+### Deployment
 
 ```bash
-./deploy.sh \
-  --telegram-token "BOT_TOKEN" \
-  --anthropic-key "sk-ant-..." \
-  --github-token "ghp_..." \
-  --owner-telegram-id "123456789"
+cp .env.example .env    # Fill in tokens
+./deploy.sh             # GCP VM
+./deploy-local.sh user@host  # Local/home server
 ```
 
-**What it does (first run):**
+### Environment Variables
 
-1. Creates a GCE VM with the configured machine type
-2. Waits for the VM to be ready
-3. SSHs into the VM and runs setup:
-   - Installs Node.js, Docker, git
-   - Clones the brain repo from GitHub
-   - Runs `npm install`
-   - Writes environment variables to `/etc/brain/env`
-   - Installs and starts the systemd service
-4. Confirms the brain is running (health check)
-5. Prints the Telegram bot name
+| Variable | Required | Description |
+|---|---|---|
+| `BRIAN_NAME` | No | Identity (default: `brian`) |
+| `SLACK_BOT_TOKEN` | Yes | Slack bot token (`xoxb-...`) |
+| `SLACK_CHANNEL_ID` | Yes | Slack channel to monitor |
+| `ANTHROPIC_API_KEY` | Yes | Anthropic API key |
+| `GITHUB_TOKEN` | No | GitHub personal access token |
+| `BRIAN_MODEL` | No | LLM model (default: `claude-sonnet-4-5`) |
+| `POLL_INTERVAL_SECONDS` | No | Slack polling interval (default: `30`) |
+| `HEARTBEAT_INTERVAL_MINUTES` | No | Proactive check interval (default: `30`) |
 
-**What it does (subsequent runs):**
-
-1. SSHs into the existing VM
-2. Pulls latest code
-3. Reinstalls dependencies
-4. Restarts the service
-
-**Destroy script (`destroy.sh`):**
-
-- Deletes the GCE VM
-- Optionally cleans up associated resources (firewall rules, etc.)
-
-### Systemd Service
-
-```ini
-[Unit]
-Description=Brain AI Agent
-After=network.target docker.service
-
-[Service]
-Type=simple
-User=brain
-WorkingDirectory=/home/brain/app
-EnvironmentFile=/etc/brain/env
-ExecStart=/usr/bin/node dist/main.js
-Restart=on-failure
-RestartSec=5
-StartLimitBurst=5
-StartLimitIntervalSec=60
-
-[Install]
-WantedBy=multi-user.target
-```
-
-### Self-Deploy Script (`deploy-self.sh`)
-
-Lives on the VM at `/home/brain/deploy-self.sh`. The brain triggers it to deploy changes to itself.
-
-```bash
-#!/bin/bash
-set -e
-
-cd /home/brain/app
-PREVIOUS=$(git rev-parse HEAD)
-
-git pull origin main
-npm ci
-npm run build
-
-sudo systemctl restart brain
-
-sleep 20
-
-if ! systemctl is-active --quiet brain; then
-  git checkout "$PREVIOUS"
-  npm ci
-  npm run build
-  sudo systemctl restart brain
-fi
-```
-
-## Filesystem Layout on the VM
+### Filesystem Layout
 
 ```
-/home/brain/
-├── app/                    # The brain repo (cloned from GitHub)
-│   ├── src/                # Source code
-│   ├── workspace/          # Memory files (committed to git)
-│   │   ├── MEMORY.md
-│   │   ├── HEARTBEAT.md
-│   │   └── memory/
-│   ├── deploy-self.sh
-│   ├── package.json
-│   └── tsconfig.json
-├── secrets/                # Credentials (NOT in git)
-│   ├── MANIFEST.md         # Inventory (this one IS committed via workspace)
-│   └── ... (.env files, tokens, keys)
-├── projects/               # Cloned repos the agent works on
-│   └── platform/           # e.g., the grovina/platform monorepo
-└── deploy-self.sh          # Self-deploy script (copied from app/)
-
-/etc/brain/
-└── env                     # Environment variables (Telegram token, API keys)
-```
-
-## Configuration
-
-Stored as environment variables in `/etc/brain/env`:
-
-```bash
-TELEGRAM_BOT_TOKEN=...
-TELEGRAM_OWNER_ID=...          # Only respond to this user
-ANTHROPIC_API_KEY=...
-GITHUB_TOKEN=...
-BRAIN_MODEL=claude-sonnet-4-20250514  # Default LLM model
-HEARTBEAT_INTERVAL_MINUTES=30
-HEARTBEAT_ACTIVE_HOURS_START=08:00
-HEARTBEAT_ACTIVE_HOURS_END=22:00
-```
-
-Additional configuration can be added as needed. No config file format — just env vars.
-
-## First Boot Experience
-
-1. Developer runs `./deploy.sh` with the three required tokens + owner Telegram ID
-2. VM is created, software installed, brain deployed
-3. The brain connects to Telegram and sends a message to the owner:
-
-   > "Hello! I'm online. I have shell access, Docker, and git on this machine. I don't know anything about your projects yet — tell me what to work on or send me files I'll need."
-
-4. The owner can now:
-   - Send tasks: "Clone grovina/platform and explore the structure"
-   - Send files: attach a `.env` file with a caption like "this is for the payper app"
-   - Ask questions: "What do you know so far?"
-
-5. Over time, the brain accumulates context, credentials, and project knowledge through natural conversation.
-
-## Project Structure
-
-```
-brain/
-├── deploy.sh               # Create/update VM from laptop
-├── destroy.sh              # Tear down VM
-├── deploy-self.sh          # Self-deploy script (used on the VM)
-├── setup/
-│   └── cloud-init.yaml     # VM initialization (packages, users, etc.)
-├── src/
-│   ├── main.ts             # Entry point: starts Telegram bot + heartbeat
-│   ├── config.ts           # Environment variable loading
-│   ├── telegram.ts         # Telegram bot setup, message routing, file handling
-│   ├── agent.ts            # Agent loop: LLM conversation with tool calling
-│   ├── system-prompt.ts    # System prompt assembly (identity + context + memory)
-│   ├── tools/
-│   │   ├── index.ts        # Tool registry
-│   │   ├── bash.ts         # Shell command execution
-│   │   ├── files.ts        # File read/write/list
-│   │   ├── memory.ts       # Memory read/write/search
-│   │   └── self-deploy.ts  # Trigger self-deployment
-│   ├── memory.ts           # Memory file management
-│   └── heartbeat.ts        # Periodic heartbeat scheduler
+~/.brian/                   # Local state (NOT in git)
 ├── workspace/
-│   ├── MEMORY.md           # Long-term memory (committed to git)
-│   ├── HEARTBEAT.md        # Heartbeat checklist (committed to git)
-│   └── memory/             # Daily logs (committed to git)
-├── package.json
-├── tsconfig.json
-├── .gitignore              # Excludes secrets/, node_modules/, dist/
-└── README.md
+│   ├── MEMORY.md           # Long-term memory
+│   ├── HEARTBEAT.md        # Heartbeat checklist
+│   └── memory/             # Daily logs with operational stats
+├── conversation-history.json
+├── last-slack-ts
+└── logs/
+
+~/app/                      # The brian repo (cloned from GitHub)
+├── src/
+│   ├── main.ts             # Polling loop
+│   ├── agent.ts            # LLM reasoning loop
+│   ├── slack.ts            # Slack API client
+│   ├── config.ts           # Environment config
+│   ├── system-prompt.ts    # Identity and context assembly
+│   ├── memory.ts           # Memory file reading
+│   ├── logger.ts           # Logging
+│   └── tools/
+│       ├── index.ts        # Tool registry
+│       ├── bash.ts         # Shell execution
+│       ├── files.ts        # File operations
+│       ├── memory.ts       # Memory read/write/search
+│       └── self-deploy.ts  # Self-deployment
+├── deploy.sh               # GCP deployment
+├── deploy-local.sh         # Local deployment
+├── deploy-self.sh          # Self-deployment (used on the VM)
+└── setup/
+    └── brian.service        # systemd unit
+
+~/secrets/                  # Credentials (NOT in git)
+~/projects/                 # Repos Brian works on
 ```
 
-## System Prompt
+## Future Directions
 
-The system prompt defines who the brain is. It should be stored in `src/system-prompt.ts` and assembled at runtime. It includes:
+Capabilities to layer on after the core works:
 
-1. **Identity**: Who the agent is, who the owner is, what its purpose is
-2. **Capabilities**: What tools it has, what it can do
-3. **Workspace context**: Current working state, available projects and credentials
-4. **Memory**: Relevant entries from `MEMORY.md` and recent daily logs
-5. **Guidelines**: How to communicate (concise Telegram messages), when to ask vs. act, how to handle secrets
-
-The system prompt should be clear and purposeful, not prescriptive. Trust the model's judgment.
-
-## Future Directions (Not in Scope for V1)
-
-These are capabilities that could be layered on after the core works:
-
-- **Voice messages**: Transcribe Telegram voice messages using Whisper/Gemini, respond with TTS
-- **Voice calls**: Real-time audio conversation via Telegram calls or WebRTC
-- **Webhook reactions**: GitHub webhooks that trigger agent responses (PR reviews, CI failures)
-- **Vector memory search**: Embed memory chunks for semantic retrieval
-- **Multiple projects simultaneously**: Working on several repos with context switching
-- **Proactive behavior**: The agent notices things and acts without being asked
-- **Web browsing**: Playwright/Puppeteer for web research or testing
-- **Stronger scaling**: Spin up a bigger VM on demand for heavy Docker workloads, then stop it
+- **Claude Code integration** — delegate coding tasks to a specialist tool
+- **Delegation tool** — brian can spawn sub-tasks to parallel LLM calls
+- **Slack thread awareness** — use threads for deep work, channel for coordination
+- **Adaptive polling** — shorter intervals after recent activity, longer when idle
+- **Image/file handling** — process images and documents from Slack
+- **MCP integrations** — connect to external tools as they become available

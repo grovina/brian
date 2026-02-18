@@ -1,29 +1,28 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { config } from "./config.js";
 
 const SLACK_API = "https://slack.com/api";
 
-interface SlackFile {
-  mimetype: string;
-  url_private: string;
-  name?: string;
-}
+const IMAGE_TYPES = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+]);
 
-interface SlackMessage {
+export interface SlackMessage {
   ts: string;
   text?: string;
   user?: string;
+  username?: string;
   bot_id?: string;
-  files?: SlackFile[];
+  files?: { mimetype: string; url_private: string; name?: string }[];
 }
 
-export interface IncomingMessage {
-  ts: string;
-  user?: string;
-  content: Anthropic.MessageParam["content"];
-}
-
-async function api(method: string, body: Record<string, unknown>): Promise<any> {
+export async function api(
+  method: string,
+  body: Record<string, unknown>
+): Promise<any> {
   const res = await fetch(`${SLACK_API}/${method}`, {
     method: "POST",
     headers: {
@@ -39,79 +38,69 @@ async function api(method: string, body: Record<string, unknown>): Promise<any> 
   return data;
 }
 
-const SUPPORTED_IMAGE_TYPES: Record<string, Anthropic.Base64ImageSource["media_type"]> = {
-  "image/jpeg": "image/jpeg",
-  "image/jpg": "image/jpeg",
-  "image/png": "image/png",
-  "image/gif": "image/gif",
-  "image/webp": "image/webp",
-};
+const userCache = new Map<string, string>();
 
-async function downloadImage(url: string): Promise<{ data: string; mediaType: Anthropic.Base64ImageSource["media_type"] } | null> {
+export async function resolveUser(userId: string): Promise<string> {
+  const cached = userCache.get(userId);
+  if (cached) return cached;
+
   try {
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${config.slack.botToken}` },
-    });
-    if (!res.ok) return null;
-
-    const contentType = res.headers.get("content-type")?.split(";")[0] ?? "";
-    const mediaType = SUPPORTED_IMAGE_TYPES[contentType];
-    if (!mediaType) return null;
-
-    const buffer = await res.arrayBuffer();
-    const data = Buffer.from(buffer).toString("base64");
-    return { data, mediaType };
+    const data = await api("users.info", { user: userId });
+    const name =
+      data.user?.profile?.display_name ||
+      data.user?.real_name ||
+      data.user?.name ||
+      userId;
+    userCache.set(userId, name);
+    return name;
   } catch {
-    return null;
+    return userId;
   }
 }
 
-async function buildMessageContent(msg: SlackMessage): Promise<Anthropic.MessageParam["content"]> {
-  const parts: Anthropic.ContentBlockParam[] = [];
-
-  if (msg.text?.trim()) {
-    parts.push({ type: "text", text: msg.text });
-  }
-
-  for (const file of msg.files ?? []) {
-    const mediaType = SUPPORTED_IMAGE_TYPES[file.mimetype];
-    if (!mediaType) continue;
-
-    const image = await downloadImage(file.url_private);
-    if (!image) continue;
-
-    parts.push({
-      type: "image",
-      source: { type: "base64", media_type: image.mediaType, data: image.data },
-    });
-  }
-
-  // Fall back to plain text if nothing worked
-  if (parts.length === 0) {
-    return msg.text ?? "";
-  }
-
-  return parts;
+export interface FetchMessagesOptions {
+  oldest?: string;
+  limit?: number;
 }
 
-export async function getNewMessages(oldest: string): Promise<IncomingMessage[]> {
-  const data = await api("conversations.history", {
+export async function fetchMessages(
+  options: FetchMessagesOptions = {}
+): Promise<SlackMessage[]> {
+  const params: Record<string, unknown> = {
     channel: config.slack.channelId,
-    oldest,
-    limit: 100,
-  });
-  const messages: SlackMessage[] = data.messages ?? [];
-  const filtered = messages.filter((m) => !m.bot_id && (m.text || m.files?.length)).reverse();
+    limit: options.limit ?? 50,
+  };
+  if (options.oldest) params.oldest = options.oldest;
 
-  const result: IncomingMessage[] = [];
-  for (const msg of filtered) {
-    const content = await buildMessageContent(msg);
-    result.push({ ts: msg.ts, user: msg.user, content });
-  }
-  return result;
+  const data = await api("conversations.history", params);
+  const messages: SlackMessage[] = data.messages ?? [];
+  return messages.reverse();
 }
 
-export async function postMessage(text: string): Promise<void> {
+export function formatMessage(msg: SlackMessage, userName: string): string {
+  const time = new Date(Number(msg.ts) * 1000).toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  const parts: string[] = [];
+  if (msg.text?.trim()) parts.push(msg.text);
+
+  const imageCount =
+    msg.files?.filter((f) => IMAGE_TYPES.has(f.mimetype)).length ?? 0;
+  if (imageCount > 0)
+    parts.push(`[${imageCount} image${imageCount > 1 ? "s" : ""} attached]`);
+
+  const nonImageFiles =
+    msg.files?.filter((f) => !IMAGE_TYPES.has(f.mimetype)) ?? [];
+  for (const file of nonImageFiles) {
+    parts.push(`[file: ${file.name || "unnamed"}]`);
+  }
+
+  return `[${time}] ${userName}: ${parts.join(" ")}`;
+}
+
+export async function sendMessage(text: string): Promise<void> {
   await api("chat.postMessage", {
     channel: config.slack.channelId,
     text,

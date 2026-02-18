@@ -7,6 +7,7 @@ import {
   memorySearchTool,
 } from "./memory.js";
 import { selfDeployTool } from "./self-deploy.js";
+import { slackReadTool, slackPostTool } from "./slack.js";
 
 export interface Tool {
   name: string;
@@ -23,6 +24,8 @@ const allTools: Tool[] = [
   memoryWriteTool,
   memorySearchTool,
   selfDeployTool,
+  slackReadTool,
+  slackPostTool,
 ];
 
 const toolMap = new Map(allTools.map((t) => [t.name, t]));

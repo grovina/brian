@@ -37,7 +37,11 @@ async function saveConversationState(): Promise<void> {
     await fs.mkdir(STATE_DIR, { recursive: true });
     await fs.writeFile(
       STATE_FILE,
-      JSON.stringify({ messages: conversationHistory, lastActivity: Date.now() }, null, 2)
+      JSON.stringify(
+        { messages: conversationHistory, lastActivity: Date.now() },
+        null,
+        2
+      )
     );
   } catch (err) {
     console.error("Failed to save conversation state:", err);
@@ -51,9 +55,11 @@ async function callLLM(
   let lastError: Error | null = null;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      // Combine native tools with MCP tools
-      const allTools = [...getToolDefinitions(), ...mcpManager.getToolDefinitions()];
-      
+      const allTools = [
+        ...getToolDefinitions(),
+        ...mcpManager.getToolDefinitions(),
+      ];
+
       return await client.messages.create({
         model: config.anthropic.model,
         max_tokens: 16384,
@@ -76,12 +82,10 @@ async function executeTool(
   toolName: string,
   toolInput: Record<string, unknown>
 ): Promise<string> {
-  // Check if it's an MCP tool (prefixed with server name)
   if (toolName.includes("__")) {
     return await mcpManager.executeTool(toolName, toolInput);
   }
-  
-  // Native tool
+
   const tool = getTool(toolName);
   if (!tool) return `Unknown tool: ${toolName}`;
   try {
@@ -91,18 +95,16 @@ async function executeTool(
   }
 }
 
-export interface AgentResult {
-  response: string;
+async function logStats(stats: {
   toolCalls: number;
   tokensIn: number;
   tokensOut: number;
   durationMs: number;
-}
-
-export type MessageContent = string | Anthropic.MessageParam["content"];
-
-async function logStats(stats: Omit<AgentResult, "response">): Promise<void> {
-  const time = new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+}): Promise<void> {
+  const time = new Date().toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
   const duration = (stats.durationMs / 1000).toFixed(1);
   const line = `- [${time}] ${stats.tokensIn} in + ${stats.tokensOut} out tokens | ${stats.toolCalls} tools | ${duration}s\n`;
 
@@ -113,11 +115,28 @@ async function logStats(stats: Omit<AgentResult, "response">): Promise<void> {
 
 loadConversationState().catch(console.error);
 
-export async function runAgent(userMessage: MessageContent): Promise<AgentResult> {
+export async function runAgent(): Promise<void> {
   const startTime = Date.now();
   const systemPrompt = await buildSystemPrompt();
 
-  conversationHistory.push({ role: "user", content: userMessage });
+  const now = new Date();
+  const wake = now.toLocaleString("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  // Trim any trailing user messages to maintain valid alternation
+  while (
+    conversationHistory.length > 0 &&
+    conversationHistory[conversationHistory.length - 1].role === "user"
+  ) {
+    conversationHistory.pop();
+  }
+
+  conversationHistory.push({ role: "user", content: `[${wake}]` });
 
   let toolCalls = 0;
   let tokensIn = 0;
@@ -138,30 +157,33 @@ export async function runAgent(userMessage: MessageContent): Promise<AgentResult
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
       for (const toolUse of toolUseBlocks) {
         toolCalls++;
-        console.log(`[tool] ${toolUse.name}`, JSON.stringify(toolUse.input).slice(0, 200));
-        const result = await executeTool(toolUse.name, toolUse.input as Record<string, unknown>);
-        toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: result });
+        console.log(
+          `[tool] ${toolUse.name}`,
+          JSON.stringify(toolUse.input).slice(0, 200)
+        );
+        const result = await executeTool(
+          toolUse.name,
+          toolUse.input as Record<string, unknown>
+        );
+        toolResults.push({
+          type: "tool_result",
+          tool_use_id: toolUse.id,
+          content: result,
+        });
       }
 
       conversationHistory.push({ role: "user", content: toolResults });
       continue;
     }
 
-    const textBlocks = response.content.filter(
-      (b): b is Anthropic.TextBlock => b.type === "text"
-    );
-    const responseText = textBlocks.map((b) => b.text).join("\n");
-    const stats = { toolCalls, tokensIn, tokensOut, durationMs: Date.now() - startTime };
-
-    await saveConversationState();
-    await logStats(stats);
-
-    return { response: responseText, ...stats };
+    break;
   }
 
-  const stats = { toolCalls, tokensIn, tokensOut, durationMs: Date.now() - startTime };
   await saveConversationState();
-  await logStats(stats);
-
-  return { response: "Reached maximum number of turns.", ...stats };
+  await logStats({
+    toolCalls,
+    tokensIn,
+    tokensOut,
+    durationMs: Date.now() - startTime,
+  });
 }

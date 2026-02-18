@@ -16,7 +16,7 @@ const HOME = homedir();
 
 export const config = {
   name: optional("BRIAN_NAME", "brian"),
-  pollIntervalSeconds: Number(optional("POLL_INTERVAL_SECONDS", "30")),
+  wakeIntervalMinutes: Number(optional("WAKE_INTERVAL_MINUTES", "3")),
   slack: {
     botToken: required("SLACK_BOT_TOKEN"),
     channelId: required("SLACK_CHANNEL_ID"),
@@ -27,11 +27,6 @@ export const config = {
   },
   github: {
     token: optional("GITHUB_TOKEN", ""),
-  },
-  heartbeat: {
-    intervalMinutes: Number(optional("HEARTBEAT_INTERVAL_MINUTES", "30")),
-    activeHoursStart: optional("HEARTBEAT_ACTIVE_HOURS_START", "08:00"),
-    activeHoursEnd: optional("HEARTBEAT_ACTIVE_HOURS_END", "22:00"),
   },
   paths: {
     workspace: optional("BRIAN_WORKSPACE", `${HOME}/.brian/workspace`),

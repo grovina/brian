@@ -4,6 +4,7 @@ import path from "path";
 import { config } from "./config.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import { getToolDefinitions, getTool } from "./tools/index.js";
+import { todayLogPath } from "./memory.js";
 
 const client = new Anthropic({ apiKey: config.anthropic.apiKey });
 
@@ -15,33 +16,17 @@ const STATE_FILE = path.join(STATE_DIR, "conversation-history.json");
 
 type Message = Anthropic.MessageParam;
 
-interface ConversationState {
-  messages: Message[];
-  lastActivity: number;
-}
-
 let conversationHistory: Message[] = [];
-
-// Message queue to prevent concurrent processing
-interface QueuedMessage {
-  content: MessageContent;
-  resolve: (result: AgentResult) => void;
-  reject: (error: Error) => void;
-}
-
-let messageQueue: QueuedMessage[] = [];
-let isProcessing = false;
 
 async function loadConversationState(): Promise<void> {
   try {
     await fs.mkdir(STATE_DIR, { recursive: true });
     const data = await fs.readFile(STATE_FILE, "utf-8");
-    const state: ConversationState = JSON.parse(data);
-    
+    const state = JSON.parse(data);
     const recentMessages = state.messages.slice(-MAX_HISTORY_MESSAGES);
     conversationHistory.push(...recentMessages);
-    console.log(`Restored ${recentMessages.length} recent messages from history`);
-  } catch (err) {
+    console.log(`Restored ${recentMessages.length} messages from history`);
+  } catch {
     console.log("Starting fresh conversation");
   }
 }
@@ -49,11 +34,10 @@ async function loadConversationState(): Promise<void> {
 async function saveConversationState(): Promise<void> {
   try {
     await fs.mkdir(STATE_DIR, { recursive: true });
-    const state: ConversationState = {
-      messages: conversationHistory,
-      lastActivity: Date.now(),
-    };
-    await fs.writeFile(STATE_FILE, JSON.stringify(state, null, 2));
+    await fs.writeFile(
+      STATE_FILE,
+      JSON.stringify({ messages: conversationHistory, lastActivity: Date.now() }, null, 2)
+    );
   } catch (err) {
     console.error("Failed to save conversation state:", err);
   }
@@ -89,9 +73,7 @@ async function executeTool(
   toolInput: Record<string, unknown>
 ): Promise<string> {
   const tool = getTool(toolName);
-  if (!tool) {
-    return `Unknown tool: ${toolName}`;
-  }
+  if (!tool) return `Unknown tool: ${toolName}`;
   try {
     return await tool.execute(toolInput);
   } catch (err) {
@@ -102,36 +84,41 @@ async function executeTool(
 export interface AgentResult {
   response: string;
   toolCalls: number;
+  tokensIn: number;
+  tokensOut: number;
+  durationMs: number;
 }
 
 export type MessageContent = string | Anthropic.MessageParam["content"];
 
-async function processMessage(userMessage: MessageContent): Promise<AgentResult> {
+async function logStats(stats: Omit<AgentResult, "response">): Promise<void> {
+  const time = new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  const duration = (stats.durationMs / 1000).toFixed(1);
+  const line = `- [${time}] ${stats.tokensIn} in + ${stats.tokensOut} out tokens | ${stats.toolCalls} tools | ${duration}s\n`;
+
+  const logPath = todayLogPath();
+  await fs.mkdir(path.dirname(logPath), { recursive: true });
+  await fs.appendFile(logPath, line);
+}
+
+loadConversationState().catch(console.error);
+
+export async function runAgent(userMessage: MessageContent): Promise<AgentResult> {
+  const startTime = Date.now();
   const systemPrompt = await buildSystemPrompt();
 
-  conversationHistory.push({
-    role: "user",
-    content: userMessage,
-  });
+  conversationHistory.push({ role: "user", content: userMessage });
 
   let toolCalls = 0;
+  let tokensIn = 0;
+  let tokensOut = 0;
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     const response = await callLLM(systemPrompt, conversationHistory);
+    tokensIn += response.usage.input_tokens;
+    tokensOut += response.usage.output_tokens;
 
-    conversationHistory.push({
-      role: "assistant",
-      content: response.content,
-    });
-
-    if (response.stop_reason === "end_turn") {
-      const textBlocks = response.content.filter(
-        (b): b is Anthropic.TextBlock => b.type === "text"
-      );
-      const responseText = textBlocks.map((b) => b.text).join("\n");
-      await saveConversationState();
-      return { response: responseText, toolCalls };
-    }
+    conversationHistory.push({ role: "assistant", content: response.content });
 
     if (response.stop_reason === "tool_use") {
       const toolUseBlocks = response.content.filter(
@@ -139,81 +126,32 @@ async function processMessage(userMessage: MessageContent): Promise<AgentResult>
       );
 
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
-
       for (const toolUse of toolUseBlocks) {
         toolCalls++;
         console.log(`[tool] ${toolUse.name}`, JSON.stringify(toolUse.input).slice(0, 200));
-        const result = await executeTool(
-          toolUse.name,
-          toolUse.input as Record<string, unknown>
-        );
-        toolResults.push({
-          type: "tool_result",
-          tool_use_id: toolUse.id,
-          content: result,
-        });
+        const result = await executeTool(toolUse.name, toolUse.input as Record<string, unknown>);
+        toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: result });
       }
 
-      conversationHistory.push({
-        role: "user",
-        content: toolResults,
-      });
-
+      conversationHistory.push({ role: "user", content: toolResults });
       continue;
     }
 
     const textBlocks = response.content.filter(
       (b): b is Anthropic.TextBlock => b.type === "text"
     );
+    const responseText = textBlocks.map((b) => b.text).join("\n");
+    const stats = { toolCalls, tokensIn, tokensOut, durationMs: Date.now() - startTime };
+
     await saveConversationState();
-    return {
-      response: textBlocks.map((b) => b.text).join("\n"),
-      toolCalls,
-    };
+    await logStats(stats);
+
+    return { response: responseText, ...stats };
   }
 
+  const stats = { toolCalls, tokensIn, tokensOut, durationMs: Date.now() - startTime };
   await saveConversationState();
-  return {
-    response: "Reached maximum number of turns. The task may be incomplete.",
-    toolCalls,
-  };
-}
+  await logStats(stats);
 
-async function processQueue(): Promise<void> {
-  while (messageQueue.length > 0) {
-    const queued = messageQueue.shift()!;
-    try {
-      const result = await processMessage(queued.content);
-      queued.resolve(result);
-    } catch (err) {
-      queued.reject(err as Error);
-    }
-  }
-  isProcessing = false;
-}
-
-// Load state on module initialization
-loadConversationState().catch(console.error);
-
-export async function runAgent(userMessage: MessageContent): Promise<AgentResult> {
-  return new Promise((resolve, reject) => {
-    messageQueue.push({ content: userMessage, resolve, reject });
-    
-    if (!isProcessing) {
-      isProcessing = true;
-      processQueue().catch(err => {
-        console.error("Queue processing error:", err);
-        isProcessing = false;
-      });
-    }
-  });
-}
-
-export async function clearConversation(): Promise<void> {
-  conversationHistory.length = 0;
-  try {
-    await fs.unlink(STATE_FILE);
-  } catch (err) {
-    // File might not exist
-  }
+  return { response: "Reached maximum number of turns.", ...stats };
 }

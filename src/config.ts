@@ -15,9 +15,11 @@ function optional(name: string, fallback: string): string {
 const HOME = homedir();
 
 export const config = {
-  telegram: {
-    botToken: required("TELEGRAM_BOT_TOKEN"),
-    ownerId: Number(required("TELEGRAM_OWNER_ID")),
+  name: optional("BRIAN_NAME", "brian"),
+  pollIntervalSeconds: Number(optional("POLL_INTERVAL_SECONDS", "30")),
+  slack: {
+    botToken: required("SLACK_BOT_TOKEN"),
+    channelId: required("SLACK_CHANNEL_ID"),
   },
   anthropic: {
     apiKey: required("ANTHROPIC_API_KEY"),

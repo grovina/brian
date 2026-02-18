@@ -1,22 +1,40 @@
 # Brian
 
-A self-hosted AI agent that acts as a personal developer, assistant, and manager. Runs as a persistent process on a VM, communicates via Telegram, executes tasks using shell tools, and can modify its own code.
+An autonomous AI worker that runs as a persistent process, communicates via Slack, and can modify its own code. Designed to operate as part of a team of brians — independent agents sharing the same codebase, each with their own identity and memory.
+
+## Architecture
+
+Brian is a polling loop. Every 30 seconds it checks Slack for new messages, processes them sequentially, and periodically runs through a heartbeat checklist. When there's nothing to do, it idles. Cost is proportional to actual work.
+
+- **Git** is the persistent source of truth (code, docs, memory)
+- **Slack** is the ephemeral communication layer
+- **Anthropic Claude** is the brain
 
 ## Setup
 
-```bash
-./deploy.sh \
-  --telegram-token "BOT_TOKEN" \
-  --anthropic-key "sk-ant-..." \
-  --github-token "ghp_..." \
-  --owner-telegram-id "123456789"
-```
+1. Create a Slack app at [api.slack.com/apps](https://api.slack.com/apps):
+   - Enable Socket Mode (to get an app-level token — not used, but required for bot setup)
+   - Add Bot Token Scopes: `chat:write`, `channels:history`, `channels:read`
+   - Install to workspace
+   - Create a channel for the brian and note the channel ID
+
+2. Configure environment:
+   ```bash
+   cp .env.example .env
+   # Fill in SLACK_BOT_TOKEN, SLACK_CHANNEL_ID, ANTHROPIC_API_KEY, GITHUB_TOKEN
+   ```
+
+3. Deploy:
+   ```bash
+   ./deploy.sh              # GCP VM
+   ./deploy-local.sh user@host  # Local/home server
+   ```
 
 ## Development
 
 ```bash
 npm install
-npm run dev          # Run with tsx (hot reload)
+npm run dev          # Run with tsx
 npm run build        # Compile TypeScript
 npm start            # Run compiled output
 ```
@@ -25,11 +43,15 @@ npm start            # Run compiled output
 
 | Variable | Required | Description |
 |---|---|---|
-| `TELEGRAM_BOT_TOKEN` | Yes | Telegram bot token from @BotFather |
-| `TELEGRAM_OWNER_ID` | Yes | Telegram user ID of the owner |
+| `BRIAN_NAME` | No | Identity (default: `brian`) — used in Slack and git |
+| `SLACK_BOT_TOKEN` | Yes | Slack bot token (`xoxb-...`) |
+| `SLACK_CHANNEL_ID` | Yes | Slack channel to monitor |
 | `ANTHROPIC_API_KEY` | Yes | Anthropic API key |
 | `GITHUB_TOKEN` | No | GitHub personal access token |
-| `BRIAN_MODEL` | No | LLM model (default: `claude-sonnet-4-20250514`) |
-| `HEARTBEAT_INTERVAL_MINUTES` | No | Heartbeat interval (default: 30) |
-| `HEARTBEAT_ACTIVE_HOURS_START` | No | Heartbeat active window start (default: `08:00`) |
-| `HEARTBEAT_ACTIVE_HOURS_END` | No | Heartbeat active window end (default: `22:00`) |
+| `BRIAN_MODEL` | No | LLM model (default: `claude-sonnet-4-5`) |
+| `POLL_INTERVAL_SECONDS` | No | How often to check Slack (default: `30`) |
+| `HEARTBEAT_INTERVAL_MINUTES` | No | Proactive check interval (default: `30`) |
+
+## Multiple Brians
+
+Each brian is an independent process with its own `BRIAN_NAME` and `SLACK_CHANNEL_ID`. They share the same Slack bot token and codebase. Deploy multiple instances with different `.env` files.

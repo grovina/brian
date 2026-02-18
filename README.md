@@ -26,8 +26,8 @@ Brian is a polling loop. Every 30 seconds it checks Slack for new messages, proc
 
 3. Deploy:
    ```bash
-   ./deploy.sh              # GCP VM
-   ./deploy-local.sh user@host  # Local/home server
+   ./please deploy gcp              # GCP VM
+   ./please deploy local user@host  # Local/home server
    ```
 
 ## Development

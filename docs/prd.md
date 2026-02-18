@@ -103,7 +103,7 @@ This data is visible in the system prompt (recent activity), letting Brian reaso
 
 Brian's codebase is a project Brian works on. It can read its own source, modify it, test, commit, push, and trigger self-deployment. Significant changes should be discussed in Slack first.
 
-The deploy script (`deploy-self.sh`) handles the restart with automatic rollback if the new version fails to start.
+The deploy script (`setup/deploy-self.sh`) handles the restart with automatic rollback if the new version fails to start.
 
 ## Multiple Brians
 
@@ -133,8 +133,8 @@ Any machine with Node.js 22+. No GPU, no database, no heavy dependencies.
 
 ```bash
 cp .env.example .env    # Fill in tokens
-./deploy.sh             # GCP VM
-./deploy-local.sh user@host  # Local/home server
+./please deploy gcp              # GCP VM
+./please deploy local user@host  # Local/home server
 ```
 
 ### Environment Variables
@@ -177,11 +177,10 @@ cp .env.example .env    # Fill in tokens
 │       ├── files.ts        # File operations
 │       ├── memory.ts       # Memory read/write/search
 │       └── self-deploy.ts  # Self-deployment
-├── deploy.sh               # GCP deployment
-├── deploy-local.sh         # Local deployment
-├── deploy-self.sh          # Self-deployment (used on the VM)
+├── please                  # CLI for humans (deploy, destroy, logs, ssh, status)
 └── setup/
-    └── brian.service        # systemd unit
+    ├── brian.service        # systemd unit
+    └── deploy-self.sh      # Brian: self-deployment on the VM
 
 ~/secrets/                  # Credentials (NOT in git)
 ~/projects/                 # Repos Brian works on

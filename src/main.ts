@@ -1,7 +1,8 @@
 import "./logger.js";
 import { config } from "./config.js";
 import { runAgent } from "./agent.js";
-import { getNewMessages, postMessage } from "./slack.js";
+import { getNewMessages } from "./slack.js";
+import { postMessage } from "./slack.js";
 import { readHeartbeat } from "./memory.js";
 import { mcpManager } from "./mcp-client.js";
 import fs from "fs/promises";
@@ -27,13 +28,13 @@ async function saveLastTs(ts: string): Promise<void> {
 async function loadMCPServers(): Promise<void> {
   try {
     const configData = await fs.readFile(MCP_CONFIG_FILE, "utf-8");
-    const config = JSON.parse(configData);
-    
-    if (config.servers && Array.isArray(config.servers)) {
-      for (const server of config.servers) {
+    const mcpConfig = JSON.parse(configData);
+
+    if (mcpConfig.servers && Array.isArray(mcpConfig.servers)) {
+      for (const server of mcpConfig.servers) {
         await mcpManager.addServer(server);
       }
-      console.log(`Loaded ${config.servers.length} MCP server(s)`);
+      console.log(`Loaded ${mcpConfig.servers.length} MCP server(s)`);
     }
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
@@ -65,8 +66,8 @@ async function loop(): Promise<void> {
       const messages = await getNewMessages(lastTs);
 
       for (const msg of messages) {
-        console.log(`[slack] ${msg.user}: ${msg.text!.substring(0, 100)}`);
-        const result = await runAgent(msg.text!);
+        console.log(`[slack] ${msg.user}: ${JSON.stringify(msg.content).substring(0, 100)}`);
+        const result = await runAgent(msg.content);
         await postMessage(result.response);
         lastTs = msg.ts;
         await saveLastTs(lastTs);

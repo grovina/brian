@@ -179,6 +179,14 @@ cmd_status() {
   fi
 }
 
+cmd_restart() {
+  load_env
+  gcp_vars
+  echo "Restarting ${BRIAN_NAME} on ${VM}..."
+  gcloud compute ssh "$VM" --zone="$ZONE" --command "sudo -u brian /home/brian/deploy-self.sh"
+  echo "Done."
+}
+
 cmd_help() {
   cat <<'EOF'
 ./please — the polite CLI for humans
@@ -186,6 +194,7 @@ cmd_help() {
 Commands:
   deploy gcp                Deploy brian to a GCP VM
   deploy local user@host    Deploy brian to a local server
+  restart                   Pull latest code and restart brian (GCP)
   destroy                   Destroy the GCP VM
   logs                      Tail brian's logs (GCP)
   ssh                       SSH into brian's VM (GCP)
@@ -202,6 +211,7 @@ case "${1:-help}" in
       *)     echo "Unknown target: $2. Use 'gcp' or 'local'." ;;
     esac
     ;;
+  restart) cmd_restart ;;
   destroy) cmd_destroy ;;
   logs)    cmd_logs ;;
   ssh)     cmd_ssh ;;

@@ -37,7 +37,6 @@ if ! gcloud compute instances describe "$VM" --zone="$ZONE" &>/dev/null; then
   echo "Creating VM..."
   echo "Machine type: $MACHINE_TYPE (4 vCPU, 16GB RAM)"
   echo "Disk size: $BOOT_DISK_SIZE"
-  echo "Estimated cost: ~$140/month (standard) or ~$42/month (preemptible)"
   
   gcloud compute instances create "$VM" \
     --zone="$ZONE" \

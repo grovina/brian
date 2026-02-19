@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import {
   fetchMessages,
   sendMessage,
+  addReaction,
   resolveUser,
   formatMessage,
   downloadImage,
@@ -39,7 +40,6 @@ export const slackReadTool: Tool = {
 
     const latestTs = messages[messages.length - 1].ts;
 
-    // Build rich content blocks (text + images)
     const blocks: Anthropic.ToolResultBlockParam["content"] = [];
     const textLines: string[] = [];
 
@@ -49,7 +49,6 @@ export const slackReadTool: Tool = {
         : msg.username || "bot";
       textLines.push(formatMessage(msg, userName));
 
-      // Download and attach images inline
       if (hasImages(msg)) {
         for (const file of msg.files ?? []) {
           if (!(file.mimetype in { "image/jpeg": 1, "image/jpg": 1, "image/png": 1, "image/gif": 1, "image/webp": 1 })) continue;
@@ -95,5 +94,32 @@ export const slackPostTool: Tool = {
     const { text } = input as { text: string };
     await sendMessage(text);
     return "Message posted.";
+  },
+};
+
+export const slackReactTool: Tool = {
+  name: "slack_react",
+  definition: {
+    name: "slack_react",
+    description: "Add an emoji reaction to a Slack message.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        timestamp: {
+          type: "string",
+          description: "The timestamp of the message to react to.",
+        },
+        emoji: {
+          type: "string",
+          description: "The emoji name without colons (e.g. 'thumbsup', 'eyes', 'heart').",
+        },
+      },
+      required: ["timestamp", "emoji"],
+    },
+  },
+  async execute(input) {
+    const { timestamp, emoji } = input as { timestamp: string; emoji: string };
+    await addReaction(timestamp, emoji);
+    return `Reacted with :${emoji}:`;
   },
 };

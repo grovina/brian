@@ -133,3 +133,11 @@ export async function sendMessage(text: string): Promise<void> {
     username: config.name,
   });
 }
+
+export async function addReaction(timestamp: string, emoji: string): Promise<void> {
+  await api("reactions.add", {
+    channel: config.slack.channelId,
+    timestamp,
+    name: emoji,
+  });
+}

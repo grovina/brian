@@ -7,7 +7,7 @@ import {
   memorySearchTool,
 } from "./memory.js";
 import { selfDeployTool } from "./self-deploy.js";
-import { slackReadTool, slackPostTool } from "./slack.js";
+import { slackReadTool, slackPostTool, slackReactTool } from "./slack.js";
 
 export type ToolResult = string | Anthropic.ToolResultBlockParam["content"];
 
@@ -28,6 +28,7 @@ const allTools: Tool[] = [
   selfDeployTool,
   slackReadTool,
   slackPostTool,
+  slackReactTool,
 ];
 
 const toolMap = new Map(allTools.map((t) => [t.name, t]));

@@ -11,7 +11,7 @@ const client = new Anthropic({ apiKey: config.anthropic.apiKey });
 
 const MAX_TURNS = 80;
 const MAX_RETRIES = 3;
-const MAX_HISTORY_MESSAGES = 200;
+const MAX_HISTORY_MESSAGES = 100;
 const STATE_DIR = path.join(process.env.HOME || "/home/brian", ".brian");
 const STATE_FILE = path.join(STATE_DIR, "conversation-history.json");
 
@@ -46,6 +46,31 @@ function sanitizeHistory(messages: Message[]): Message[] {
   return messages.slice(start);
 }
 
+/** Strip base64 image data from history to keep the saved file small */
+function stripImages(messages: Message[]): Message[] {
+  return messages.map((msg) => {
+    if (!Array.isArray(msg.content)) return msg;
+    const stripped = msg.content.map((block: any) => {
+      if (block.type === "image" && block.source?.type === "base64") {
+        return { type: "text", text: "[image stripped from history]" };
+      }
+      // Also strip images inside tool_result content arrays
+      if (block.type === "tool_result" && Array.isArray(block.content)) {
+        return {
+          ...block,
+          content: block.content.map((b: any) =>
+            b.type === "image" && b.source?.type === "base64"
+              ? { type: "text", text: "[image stripped from history]" }
+              : b
+          ),
+        };
+      }
+      return block;
+    });
+    return { ...msg, content: stripped };
+  });
+}
+
 async function loadConversationState(): Promise<void> {
   try {
     await fs.mkdir(STATE_DIR, { recursive: true });
@@ -63,10 +88,13 @@ async function loadConversationState(): Promise<void> {
 async function saveConversationState(): Promise<void> {
   try {
     await fs.mkdir(STATE_DIR, { recursive: true });
+    // Trim and strip images before saving to keep file small
+    const toSave = stripImages(conversationHistory.slice(-MAX_HISTORY_MESSAGES));
+    const clean = sanitizeHistory(toSave);
     await fs.writeFile(
       STATE_FILE,
       JSON.stringify(
-        { messages: conversationHistory, lastActivity: Date.now() },
+        { messages: clean, lastActivity: Date.now() },
         null,
         2
       )

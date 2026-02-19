@@ -11,10 +11,10 @@ const TS_FILE = path.join(STATE_DIR, "last-slack-ts");
 const MCP_CONFIG_FILE = path.join(STATE_DIR, "mcp-servers.json");
 
 const MIN_INTERVAL_MS = config.wakeIntervalMinutes * 60_000;
-const MAX_INTERVAL_MS = 15 * 60_000;
+const MAX_INTERVAL_MS = 30 * 60_000;  // extended from 15 to 30 min
 const BACKOFF_MULTIPLIER = 1.5;
-// Run agent proactively at least once per hour even if no messages
-const PROACTIVE_INTERVAL_MS = 60 * 60_000;
+// Run agent proactively at least once per 2 hours even if no messages
+const PROACTIVE_INTERVAL_MS = 2 * 60 * 60_000;
 
 async function loadLastTs(): Promise<string> {
   try {
@@ -66,7 +66,7 @@ let lastTs = await loadLastTs();
 let currentIntervalMs = MIN_INTERVAL_MS;
 let lastAgentRunMs = Date.now();
 
-console.log(`${config.name} running — min ${config.wakeIntervalMinutes} min, max 15 min idle`);
+console.log(`${config.name} running — min ${config.wakeIntervalMinutes} min, max 30 min idle`);
 
 while (true) {
   try {

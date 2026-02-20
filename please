@@ -17,7 +17,7 @@ load_env() {
     fi
   done
   BRIAN_NAME="${BRIAN_NAME:-brian}"
-  REPO="broderz/brian"
+  REPO="grovina/brian"
 }
 
 gcp_vars() {

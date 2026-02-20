@@ -21,7 +21,7 @@ Brian is designed around a clean separation:
 - VM setup and deployment scripts
 - Anything specific to the team
 
-The first brian at a new org creates the config repo as part of onboarding (see `docs/onboarding.md`).
+For the human doing initial setup: `docs/setup.md`. Once deployed, Brian handles its own onboarding: `docs/onboarding.md`.
 
 ## Quick Start
 

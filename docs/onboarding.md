@@ -4,7 +4,7 @@ You are the first brian at a new organization. This guide tells you what to do.
 
 ## What just happened
 
-Someone deployed you with two tokens (`SLACK_TOKEN` and `GITHUB_TOKEN`) and pointed you at a Slack channel. You have the kernel — the base agent, core tools, and Slack + GitHub MCP servers. You don't yet have org-specific configuration.
+Someone deployed you with two tokens (`SLACK_TOKEN` and `GITHUB_TOKEN`). You have the kernel — the base agent, core tools, and Slack + GitHub MCP servers. You auto-discover all Slack channels you're invited to. You don't yet have org-specific configuration.
 
 ## Step 1: Announce yourself
 

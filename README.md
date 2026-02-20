@@ -30,14 +30,14 @@ Two tokens. That's all brian needs.
 ```bash
 export BRIAN_NAME=pickle-1
 export SLACK_TOKEN=xoxp-...          # Slack user token
-export ANTHROPIC_API_KEY=sk-ant-...
+export GCP_PROJECT=your-project      # Vertex AI — no API key needed
 export GITHUB_TOKEN=ghp_...
-export GITHUB_ORG=klauvi             # Optional — for config repo creation
+export GITHUB_ORG=klauvi             # Optional
 
 npm install && npm run build && npm start
 ```
 
-Brian boots up, connects to Slack and GitHub via MCP, discovers all channels it's joined, loads any user MCP servers from `~/.brian/mcp-servers.json`, and starts working. No channel ID needed — brian finds its own way around.
+Brian boots up, connects to Vertex AI (Gemini), Slack and GitHub via MCP, discovers all channels it's joined, loads any user MCP servers from `~/.brian/mcp-servers.json`, and starts working.
 
 ## Architecture
 
@@ -88,11 +88,14 @@ Server configs support `${VAR}` env var resolution in the `env` field.
 |---|---|---|
 | `BRIAN_NAME` | No | Identity (default: `brian`) |
 | `SLACK_TOKEN` | Yes | Slack user token (`xoxp-`) |
-| `ANTHROPIC_API_KEY` | Yes | Anthropic API key |
+| `GCP_PROJECT` | Yes | GCP project ID for Vertex AI |
+| `GCP_REGION` | No | Vertex AI region (default: `europe-west1`) |
 | `GITHUB_TOKEN` | No | GitHub personal access token |
 | `GITHUB_ORG` | No | GitHub org for config repo |
-| `BRIAN_MODEL` | No | LLM model (default: `claude-sonnet-4-6`) |
+| `BRIAN_MODEL` | No | LLM model (default: `gemini-3-flash-preview`) |
 | `WAKE_INTERVAL_MINUTES` | No | Min wake interval (default: `3`) |
+
+On a GCE VM, Vertex AI auth is automatic via IAM — no API key needed. For local dev, run `gcloud auth application-default login`.
 
 Brian auto-discovers all Slack channels it's joined — no channel ID needed.
 

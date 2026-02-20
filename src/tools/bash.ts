@@ -50,8 +50,8 @@ export const bashTool: Tool = {
     name: "bash",
     description:
       "Execute a shell command on the VM. Has access to git, docker, node, and standard unix tools. Commands run as the brain user with full access to the filesystem.",
-    input_schema: {
-      type: "object" as const,
+    parameters: {
+      type: "object",
       properties: {
         command: {
           type: "string",

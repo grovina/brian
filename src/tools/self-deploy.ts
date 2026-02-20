@@ -7,10 +7,9 @@ export const selfDeployTool: Tool = {
     name: "self_deploy",
     description:
       "Trigger a self-deployment: pulls latest code from main, installs dependencies, rebuilds, and restarts the process. The deploy script handles rollback if the new version fails to start. Confirm with the user before calling this.",
-    input_schema: {
-      type: "object" as const,
+    parameters: {
+      type: "object",
       properties: {},
-      required: [],
     },
   },
   async execute() {

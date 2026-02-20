@@ -52,7 +52,8 @@ Your git author name is "${config.name}".`,
 - Projects: ${config.paths.projects}
 - Secrets: ${config.paths.secrets}
 - Memory: ${config.paths.workspace}
-- Model: ${config.anthropic.model}
+- Model: ${config.llm.model}
+- LLM: Vertex AI (${config.llm.gcpProject} / ${config.llm.gcpRegion})
 - Identity: ${config.name}
 - GitHub: ${config.github.token ? "configured" : "not configured"}`,
 

@@ -78,11 +78,15 @@ Brian uses a GitHub **personal access token** (classic or fine-grained) to inter
 
 Either token type works. Fine-grained gives you tighter control over which repos Brian can access.
 
-## 3. Anthropic API Key (`ANTHROPIC_API_KEY`)
+## 3. GCP Project (`GCP_PROJECT`)
 
-1. Go to [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys)
-2. Create a new API key
-3. Copy it — starts with `sk-ant-`
+Brian uses Claude via Vertex AI. On a GCE VM, authentication is automatic via the VM's service account — no API key needed.
+
+1. Enable the Vertex AI API in your GCP project: [console.cloud.google.com/apis/library/aiplatform.googleapis.com](https://console.cloud.google.com/apis/library/aiplatform.googleapis.com)
+2. Ensure the VM's service account has the `Vertex AI User` role (`roles/aiplatform.user`)
+3. Set `GCP_PROJECT` to your project ID
+
+For local dev, install `gcloud` and run `gcloud auth application-default login`.
 
 ## Put it together
 
@@ -90,7 +94,7 @@ Either token type works. Fine-grained gives you tighter control over which repos
 # .env
 BRIAN_NAME=pickle
 SLACK_TOKEN=xoxp-...
-ANTHROPIC_API_KEY=sk-ant-...
+GCP_PROJECT=klauvi-prod
 GITHUB_TOKEN=github_pat_...
 GITHUB_ORG=klauvi
 ```

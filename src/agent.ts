@@ -1,13 +1,17 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI, ThinkingLevel, type Content, type Part } from "@google/genai";
 import fs from "fs/promises";
 import path from "path";
 import { config } from "./config.js";
 import { buildSystemPrompt } from "./system-prompt.js";
-import { getToolDefinitions, getTool } from "./tools/index.js";
+import { getToolDefinitions, getTool, type ToolDefinition, type ToolResult } from "./tools/index.js";
 import { mcpManager } from "./mcp-client.js";
 import { todayLogPath } from "./memory.js";
 
-const client = new Anthropic({ apiKey: config.anthropic.apiKey });
+const ai = new GoogleGenAI({
+  vertexai: true,
+  project: config.llm.gcpProject,
+  location: config.llm.gcpRegion,
+});
 
 const MAX_TURNS = 80;
 const MAX_RETRIES = 3;
@@ -15,14 +19,9 @@ const MAX_HISTORY_MESSAGES = 100;
 const STATE_DIR = path.join(process.env.HOME || "/home/brian", ".brian");
 const STATE_FILE = path.join(STATE_DIR, "conversation-history.json");
 
-type Message = Anthropic.MessageParam;
+let conversationHistory: Content[] = [];
 
-let conversationHistory: Message[] = [];
-
-function sanitizeHistory(messages: Message[]): Message[] {
-  // Trim leading messages until we find a user message with text content.
-  // History truncation can orphan tool_result blocks whose matching
-  // tool_use was in a now-trimmed assistant message.
+function sanitizeHistory(messages: Content[]): Content[] {
   let start = 0;
   while (start < messages.length) {
     const msg = messages[start];
@@ -30,14 +29,15 @@ function sanitizeHistory(messages: Message[]): Message[] {
       start++;
       continue;
     }
-    if (
-      Array.isArray(msg.content) &&
-      msg.content.some((b: any) => b.type === "tool_result")
-    ) {
+    const hasFunctionResponse = msg.parts?.some(
+      (p: any) => p.functionResponse
+    );
+    if (hasFunctionResponse) {
       start++;
       continue;
     }
-    if (msg.content === "" || (Array.isArray(msg.content) && msg.content.length === 0)) {
+    const hasText = msg.parts?.some((p: any) => p.text);
+    if (!hasText) {
       start++;
       continue;
     }
@@ -46,29 +46,16 @@ function sanitizeHistory(messages: Message[]): Message[] {
   return messages.slice(start);
 }
 
-/** Strip base64 image data from history to keep the saved file small */
-function stripImages(messages: Message[]): Message[] {
-  return messages.map((msg) => {
-    if (!Array.isArray(msg.content)) return msg;
-    const stripped = msg.content.map((block: any) => {
-      if (block.type === "image" && block.source?.type === "base64") {
-        return { type: "text", text: "[image stripped from history]" };
+function stripImages(messages: Content[]): Content[] {
+  return messages.map((msg) => ({
+    ...msg,
+    parts: msg.parts?.map((part: any) => {
+      if (part.inlineData) {
+        return { text: "[image stripped from history]" };
       }
-      // Also strip images inside tool_result content arrays
-      if (block.type === "tool_result" && Array.isArray(block.content)) {
-        return {
-          ...block,
-          content: block.content.map((b: any) =>
-            b.type === "image" && b.source?.type === "base64"
-              ? { type: "text", text: "[image stripped from history]" }
-              : b
-          ),
-        };
-      }
-      return block;
-    });
-    return { ...msg, content: stripped };
-  });
+      return part;
+    }),
+  }));
 }
 
 async function loadConversationState(): Promise<void> {
@@ -76,10 +63,12 @@ async function loadConversationState(): Promise<void> {
     await fs.mkdir(STATE_DIR, { recursive: true });
     const data = await fs.readFile(STATE_FILE, "utf-8");
     const state = JSON.parse(data);
-    const trimmed = state.messages.slice(-MAX_HISTORY_MESSAGES);
+    const trimmed = (state.messages as Content[]).slice(-MAX_HISTORY_MESSAGES);
     const clean = sanitizeHistory(trimmed);
     conversationHistory.push(...clean);
-    console.log(`Restored ${clean.length} messages from history (${trimmed.length - clean.length} orphaned messages trimmed)`);
+    console.log(
+      `Restored ${clean.length} messages from history (${trimmed.length - clean.length} orphaned messages trimmed)`
+    );
   } catch {
     console.log("Starting fresh conversation");
   }
@@ -88,40 +77,41 @@ async function loadConversationState(): Promise<void> {
 async function saveConversationState(): Promise<void> {
   try {
     await fs.mkdir(STATE_DIR, { recursive: true });
-    // Trim and strip images before saving to keep file small
-    const toSave = stripImages(conversationHistory.slice(-MAX_HISTORY_MESSAGES));
+    const toSave = stripImages(
+      conversationHistory.slice(-MAX_HISTORY_MESSAGES)
+    );
     const clean = sanitizeHistory(toSave);
     await fs.writeFile(
       STATE_FILE,
-      JSON.stringify(
-        { messages: clean, lastActivity: Date.now() },
-        null,
-        2
-      )
+      JSON.stringify({ messages: clean, lastActivity: Date.now() }, null, 2)
     );
   } catch (err) {
     console.error("Failed to save conversation state:", err);
   }
 }
 
-async function callLLM(
-  systemPrompt: string,
-  messages: Message[]
-): Promise<Anthropic.Message> {
+function toFunctionDeclarations(defs: ToolDefinition[]) {
+  return defs.map((d) => ({
+    name: d.name,
+    description: d.description,
+    parameters: d.parameters,
+  }));
+}
+
+async function callLLM(systemPrompt: string, contents: Content[]) {
+  const allDefs = [...getToolDefinitions(), ...mcpManager.getToolDefinitions()];
+
   let lastError: Error | null = null;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      const allTools = [
-        ...getToolDefinitions(),
-        ...mcpManager.getToolDefinitions(),
-      ];
-
-      return await client.messages.create({
-        model: config.anthropic.model,
-        max_tokens: 16384,
-        system: systemPrompt,
-        tools: allTools,
-        messages,
+      return await ai.models.generateContent({
+        model: config.llm.model,
+        contents,
+        config: {
+          systemInstruction: systemPrompt,
+          tools: [{ functionDeclarations: toFunctionDeclarations(allDefs) }],
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+        },
       });
     } catch (err) {
       lastError = err as Error;
@@ -135,17 +125,16 @@ async function callLLM(
 }
 
 async function executeTool(
-  toolName: string,
-  toolInput: Record<string, unknown>
-): Promise<Anthropic.ToolResultBlockParam["content"]> {
-  if (toolName.includes("__")) {
-    return await mcpManager.executeTool(toolName, toolInput);
+  name: string,
+  args: Record<string, unknown>
+): Promise<ToolResult> {
+  if (name.includes("__")) {
+    return await mcpManager.executeTool(name, args);
   }
-
-  const tool = getTool(toolName);
-  if (!tool) return `Unknown tool: ${toolName}`;
+  const tool = getTool(name);
+  if (!tool) return `Unknown tool: ${name}`;
   try {
-    return await tool.execute(toolInput);
+    return await tool.execute(args);
   } catch (err) {
     return `Tool error: ${(err as Error).message}`;
   }
@@ -196,7 +185,10 @@ export async function runAgent(activityContext?: string): Promise<void> {
     ? `[${wake}]${activityContext}`
     : `[${wake}] No new activity — proactive wake.`;
 
-  conversationHistory.push({ role: "user", content: wakeMessage });
+  conversationHistory.push({
+    role: "user",
+    parts: [{ text: wakeMessage }],
+  });
 
   let toolCalls = 0;
   let tokensIn = 0;
@@ -204,38 +196,61 @@ export async function runAgent(activityContext?: string): Promise<void> {
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     const response = await callLLM(systemPrompt, conversationHistory);
-    tokensIn += response.usage.input_tokens;
-    tokensOut += response.usage.output_tokens;
+    tokensIn += response.usageMetadata?.promptTokenCount ?? 0;
+    tokensOut += response.usageMetadata?.candidatesTokenCount ?? 0;
 
-    conversationHistory.push({ role: "assistant", content: response.content });
+    const modelParts: Part[] =
+      response.candidates?.[0]?.content?.parts ?? [];
 
-    if (response.stop_reason === "tool_use") {
-      const toolUseBlocks = response.content.filter(
-        (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
-      );
+    conversationHistory.push({
+      role: "model",
+      parts: modelParts,
+    });
 
-      const toolResults: Anthropic.ToolResultBlockParam[] = [];
-      for (const toolUse of toolUseBlocks) {
+    const fnCalls = response.functionCalls;
+    if (fnCalls && fnCalls.length > 0) {
+      const responseParts: Part[] = [];
+
+      for (const fc of fnCalls) {
         toolCalls++;
         console.log(
-          `[tool] ${toolUse.name}`,
-          JSON.stringify(toolUse.input).slice(0, 200)
+          `[tool] ${fc.name}`,
+          JSON.stringify(fc.args).slice(0, 200)
         );
+
         const result = await executeTool(
-          toolUse.name,
-          toolUse.input as Record<string, unknown>
+          fc.name!,
+          (fc.args as Record<string, unknown>) ?? {}
         );
-        toolResults.push({
-          type: "tool_result",
-          tool_use_id: toolUse.id,
-          content: result,
+
+        const textResult =
+          typeof result === "string" ? result : result.text;
+
+        responseParts.push({
+          functionResponse: {
+            name: fc.name!,
+            response: { result: textResult },
+          },
         });
+
+        // If the tool returned images, include them as inline data
+        if (typeof result !== "string" && result.images?.length) {
+          for (const img of result.images) {
+            responseParts.push({
+              inlineData: { data: img.data, mimeType: img.mimeType },
+            });
+          }
+        }
       }
 
-      conversationHistory.push({ role: "user", content: toolResults });
+      conversationHistory.push({
+        role: "user",
+        parts: responseParts,
+      });
       continue;
     }
 
+    // No function calls — model is done
     break;
   }
 

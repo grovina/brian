@@ -1,4 +1,3 @@
-import Anthropic from "@anthropic-ai/sdk";
 import {
   fetchMessages,
   sendMessage,
@@ -15,9 +14,9 @@ export const slackReadTool: Tool = {
   definition: {
     name: "slack_read",
     description:
-      "Read messages from a Slack channel. Pass `oldest` (a Slack message timestamp) to only get messages after that point. Use `users.conversations` via MCP to discover channels first if needed.",
-    input_schema: {
-      type: "object" as const,
+      "Read messages from a Slack channel. Pass `oldest` (a Slack message timestamp) to only get messages after that point.",
+    parameters: {
+      type: "object",
       properties: {
         channel: {
           type: "string",
@@ -47,9 +46,8 @@ export const slackReadTool: Tool = {
     if (messages.length === 0) return "No messages.";
 
     const latestTs = messages[messages.length - 1].ts;
-
-    const blocks: Anthropic.ToolResultBlockParam["content"] = [];
     const textLines: string[] = [];
+    const images: { mimeType: string; data: string }[] = [];
 
     for (const msg of messages) {
       const userName = msg.user
@@ -59,35 +57,17 @@ export const slackReadTool: Tool = {
 
       if (hasImages(msg)) {
         for (const file of msg.files ?? []) {
-          if (!(file.mimetype in SUPPORTED_IMAGE_LOOKUP)) continue;
           const image = await downloadImage(file.url_private);
           if (image) {
-            blocks.push({
-              type: "image",
-              source: {
-                type: "base64",
-                media_type: image.mediaType,
-                data: image.data,
-              },
-            } as Anthropic.ImageBlockParam);
+            images.push(image);
           }
         }
       }
     }
 
     textLines.push(`\n(latest message ts: ${latestTs})`);
-    blocks.unshift({ type: "text", text: textLines.join("\n") });
-
-    return blocks;
+    return { text: textLines.join("\n"), images };
   },
-};
-
-const SUPPORTED_IMAGE_LOOKUP: Record<string, true> = {
-  "image/jpeg": true,
-  "image/jpg": true,
-  "image/png": true,
-  "image/gif": true,
-  "image/webp": true,
 };
 
 export const slackPostTool: Tool = {
@@ -95,8 +75,8 @@ export const slackPostTool: Tool = {
   definition: {
     name: "slack_post",
     description: "Post a message to a Slack channel.",
-    input_schema: {
-      type: "object" as const,
+    parameters: {
+      type: "object",
       properties: {
         channel: {
           type: "string",
@@ -122,8 +102,8 @@ export const slackReactTool: Tool = {
   definition: {
     name: "slack_react",
     description: "Add an emoji reaction to a Slack message.",
-    input_schema: {
-      type: "object" as const,
+    parameters: {
+      type: "object",
       properties: {
         channel: {
           type: "string",

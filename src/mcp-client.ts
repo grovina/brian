@@ -1,6 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import type Anthropic from "@anthropic-ai/sdk";
+import type { ToolDefinition } from "./tools/index.js";
 import { homedir } from "os";
 import path from "path";
 
@@ -21,13 +21,6 @@ interface MCPTool {
   };
 }
 
-// Ensure ~/.local/bin is in PATH so uvx/uv are found
-const localBin = path.join(homedir(), ".local", "bin");
-const augmentedEnv: Record<string, string> = {
-  ...(process.env as Record<string, string>),
-  PATH: `${localBin}:${process.env.PATH ?? ""}`,
-};
-
 function resolveEnvVars(env: Record<string, string>): Record<string, string> {
   const resolved: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {
@@ -35,6 +28,12 @@ function resolveEnvVars(env: Record<string, string>): Record<string, string> {
   }
   return resolved;
 }
+
+const localBin = path.join(homedir(), ".local", "bin");
+const augmentedEnv: Record<string, string> = {
+  ...(process.env as Record<string, string>),
+  PATH: `${localBin}:${process.env.PATH ?? ""}`,
+};
 
 class MCPClientManager {
   private clients: Map<string, Client> = new Map();
@@ -72,13 +71,13 @@ class MCPClientManager {
     this.toolMap.clear();
   }
 
-  getToolDefinitions(): Anthropic.Tool[] {
-    const tools: Anthropic.Tool[] = [];
+  getToolDefinitions(): ToolDefinition[] {
+    const tools: ToolDefinition[] = [];
     for (const [toolName, { tool }] of this.toolMap) {
       tools.push({
         name: toolName,
         description: tool.description || `Tool from MCP server`,
-        input_schema: tool.inputSchema as Anthropic.Tool.InputSchema,
+        parameters: tool.inputSchema as Record<string, unknown>,
       });
     }
     return tools;
@@ -98,7 +97,7 @@ class MCPClientManager {
 
     if (result.content && Array.isArray(result.content)) {
       return result.content
-        .map((item) => (item.type === "text" ? item.text : JSON.stringify(item)))
+        .map((item: any) => (item.type === "text" ? item.text : JSON.stringify(item)))
         .join("\n");
     }
 

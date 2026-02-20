@@ -7,8 +7,8 @@ export const readFileTool: Tool = {
   definition: {
     name: "read_file",
     description: "Read the contents of a file.",
-    input_schema: {
-      type: "object" as const,
+    parameters: {
+      type: "object",
       properties: {
         path: {
           type: "string",
@@ -35,8 +35,8 @@ export const writeFileTool: Tool = {
   definition: {
     name: "write_file",
     description: "Write content to a file. Creates parent directories as needed.",
-    input_schema: {
-      type: "object" as const,
+    parameters: {
+      type: "object",
       properties: {
         path: {
           type: "string",
@@ -66,8 +66,8 @@ export const listFilesTool: Tool = {
   definition: {
     name: "list_files",
     description: "List files and directories at a given path.",
-    input_schema: {
-      type: "object" as const,
+    parameters: {
+      type: "object",
       properties: {
         path: {
           type: "string",

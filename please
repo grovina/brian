@@ -10,7 +10,7 @@ load_env() {
     exit 1
   fi
   source "$ENV_FILE"
-  for var in SLACK_TOKEN ANTHROPIC_API_KEY; do
+  for var in SLACK_TOKEN GCP_PROJECT; do
     if [[ -z "${!var:-}" ]]; then
       echo "Missing $var in .env"
       exit 1

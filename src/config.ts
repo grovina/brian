@@ -20,9 +20,10 @@ export const config = {
   slack: {
     token: required("SLACK_TOKEN"),
   },
-  anthropic: {
-    apiKey: required("ANTHROPIC_API_KEY"),
-    model: optional("BRIAN_MODEL", "claude-sonnet-4-6"),
+  llm: {
+    model: optional("BRIAN_MODEL", "gemini-3-flash-preview"),
+    gcpProject: required("GCP_PROJECT"),
+    gcpRegion: optional("GCP_REGION", "europe-west1"),
   },
   github: {
     token: optional("GITHUB_TOKEN", ""),

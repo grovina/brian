@@ -11,8 +11,8 @@ export const memoryReadTool: Tool = {
     name: "memory_read",
     description:
       "Read a memory file from the workspace. Use 'MEMORY.md' for long-term knowledge, 'HEARTBEAT.md' for the heartbeat checklist, or 'memory/YYYY-MM-DD.md' for daily logs.",
-    input_schema: {
-      type: "object" as const,
+    parameters: {
+      type: "object",
       properties: {
         file: {
           type: "string",
@@ -41,8 +41,8 @@ export const memoryWriteTool: Tool = {
     name: "memory_write",
     description:
       "Write or append to a memory file in the workspace. For daily logs, append new entries. For MEMORY.md, update the full content to keep it organized.",
-    input_schema: {
-      type: "object" as const,
+    parameters: {
+      type: "object",
       properties: {
         file: {
           type: "string",
@@ -83,8 +83,8 @@ export const memorySearchTool: Tool = {
     name: "memory_search",
     description:
       "Search memory files by keyword. Searches across MEMORY.md and daily log files.",
-    input_schema: {
-      type: "object" as const,
+    parameters: {
+      type: "object",
       properties: {
         query: {
           type: "string",

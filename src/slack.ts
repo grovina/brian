@@ -1,15 +1,14 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { config } from "./config.js";
 
 const SLACK_API = "https://slack.com/api";
 
-const SUPPORTED_IMAGE_TYPES: Record<string, Anthropic.Base64ImageSource["media_type"]> = {
-  "image/jpeg": "image/jpeg",
-  "image/jpg": "image/jpeg",
-  "image/png": "image/png",
-  "image/gif": "image/gif",
-  "image/webp": "image/webp",
-};
+const SUPPORTED_IMAGE_TYPES = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+]);
 
 export interface SlackChannel {
   id: string;
@@ -117,7 +116,7 @@ export async function fetchMessages(
 
 export async function downloadImage(
   url: string
-): Promise<{ data: string; mediaType: Anthropic.Base64ImageSource["media_type"] } | null> {
+): Promise<{ data: string; mimeType: string } | null> {
   try {
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${config.slack.token}` },
@@ -125,19 +124,18 @@ export async function downloadImage(
     if (!res.ok) return null;
 
     const contentType = res.headers.get("content-type")?.split(";")[0] ?? "";
-    const mediaType = SUPPORTED_IMAGE_TYPES[contentType];
-    if (!mediaType) return null;
+    if (!SUPPORTED_IMAGE_TYPES.has(contentType)) return null;
 
     const buffer = await res.arrayBuffer();
     const data = Buffer.from(buffer).toString("base64");
-    return { data, mediaType };
+    return { data, mimeType: contentType };
   } catch {
     return null;
   }
 }
 
 export function hasImages(msg: SlackMessage): boolean {
-  return (msg.files ?? []).some((f) => f.mimetype in SUPPORTED_IMAGE_TYPES);
+  return (msg.files ?? []).some((f) => SUPPORTED_IMAGE_TYPES.has(f.mimetype));
 }
 
 export function formatMessage(msg: SlackMessage, userName: string): string {
@@ -150,12 +148,12 @@ export function formatMessage(msg: SlackMessage, userName: string): string {
   if (msg.text?.trim()) parts.push(msg.text);
 
   const imageCount =
-    msg.files?.filter((f) => f.mimetype in SUPPORTED_IMAGE_TYPES).length ?? 0;
+    msg.files?.filter((f) => SUPPORTED_IMAGE_TYPES.has(f.mimetype)).length ?? 0;
   if (imageCount > 0)
     parts.push(`[${imageCount} image${imageCount > 1 ? "s" : ""} attached]`);
 
   const nonImageFiles =
-    msg.files?.filter((f) => !(f.mimetype in SUPPORTED_IMAGE_TYPES)) ?? [];
+    msg.files?.filter((f) => !SUPPORTED_IMAGE_TYPES.has(f.mimetype)) ?? [];
   for (const file of nonImageFiles) {
     parts.push(`[file: ${file.name || "unnamed"}]`);
   }

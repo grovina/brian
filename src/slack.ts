@@ -27,7 +27,7 @@ export async function api(
   const res = await fetch(`${SLACK_API}/${method}`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${config.slack.botToken}`,
+      Authorization: `Bearer ${config.slack.token}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
@@ -83,7 +83,7 @@ export async function downloadImage(
 ): Promise<{ data: string; mediaType: Anthropic.Base64ImageSource["media_type"] } | null> {
   try {
     const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${config.slack.botToken}` },
+      headers: { Authorization: `Bearer ${config.slack.token}` },
     });
     if (!res.ok) return null;
 

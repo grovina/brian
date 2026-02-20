@@ -28,6 +28,14 @@ const augmentedEnv: Record<string, string> = {
   PATH: `${localBin}:${process.env.PATH ?? ""}`,
 };
 
+function resolveEnvVars(env: Record<string, string>): Record<string, string> {
+  const resolved: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    resolved[key] = value.replace(/\$\{(\w+)\}/g, (_, name) => process.env[name] ?? "");
+  }
+  return resolved;
+}
+
 class MCPClientManager {
   private clients: Map<string, Client> = new Map();
   private toolMap: Map<string, { server: string; tool: MCPTool }> = new Map();
@@ -36,7 +44,7 @@ class MCPClientManager {
     const transport = new StdioClientTransport({
       command: server.command,
       args: server.args || [],
-      env: { ...augmentedEnv, ...server.env },
+      env: { ...augmentedEnv, ...(server.env ? resolveEnvVars(server.env) : {}) },
     });
 
     const client = new Client(

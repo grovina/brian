@@ -18,7 +18,7 @@ export const config = {
   name: optional("BRIAN_NAME", "brian"),
   wakeIntervalMinutes: Number(optional("WAKE_INTERVAL_MINUTES", "3")),
   slack: {
-    botToken: required("SLACK_BOT_TOKEN"),
+    token: process.env.SLACK_TOKEN || required("SLACK_BOT_TOKEN"),
     channelId: required("SLACK_CHANNEL_ID"),
   },
   anthropic: {
@@ -27,6 +27,7 @@ export const config = {
   },
   github: {
     token: optional("GITHUB_TOKEN", ""),
+    org: optional("GITHUB_ORG", ""),
   },
   paths: {
     workspace: optional("BRIAN_WORKSPACE", `${HOME}/.brian/workspace`),

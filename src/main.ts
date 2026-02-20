@@ -5,10 +5,15 @@ import { mcpManager } from "./mcp-client.js";
 import { fetchMessages } from "./slack.js";
 import fs from "fs/promises";
 import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const APP_DIR = path.resolve(__dirname, "..");
 
 const STATE_DIR = path.join(process.env.HOME || "/home/brian", ".brian");
 const TS_FILE = path.join(STATE_DIR, "last-slack-ts");
-const MCP_CONFIG_FILE = path.join(STATE_DIR, "mcp-servers.json");
+const USER_MCP_FILE = path.join(STATE_DIR, "mcp-servers.json");
+const KERNEL_MCP_DIR = path.join(APP_DIR, "mcp");
 
 const MIN_INTERVAL_MS = config.wakeIntervalMinutes * 60_000;
 const MAX_INTERVAL_MS = 30 * 60_000;  // extended from 15 to 30 min
@@ -30,22 +35,42 @@ async function saveLastTs(ts: string): Promise<void> {
 }
 
 async function loadMCPServers(): Promise<void> {
+  let totalLoaded = 0;
+
+  // Load kernel MCP servers from repo's mcp/ directory
   try {
-    const configData = await fs.readFile(MCP_CONFIG_FILE, "utf-8");
+    const files = await fs.readdir(KERNEL_MCP_DIR);
+    for (const file of files.filter((f) => f.endsWith(".json"))) {
+      try {
+        const data = await fs.readFile(path.join(KERNEL_MCP_DIR, file), "utf-8");
+        const server = JSON.parse(data);
+        await mcpManager.addServer(server);
+        totalLoaded++;
+      } catch (err) {
+        console.error(`Failed to load kernel MCP server ${file}:`, err);
+      }
+    }
+  } catch {
+    // No kernel mcp/ directory
+  }
+
+  // Load user/org MCP servers from ~/.brian/mcp-servers.json
+  try {
+    const configData = await fs.readFile(USER_MCP_FILE, "utf-8");
     const mcpConfig = JSON.parse(configData);
     if (mcpConfig.servers && Array.isArray(mcpConfig.servers)) {
       for (const server of mcpConfig.servers) {
         await mcpManager.addServer(server);
+        totalLoaded++;
       }
-      console.log(`Loaded ${mcpConfig.servers.length} MCP server(s)`);
     }
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      console.log("No MCP servers configured");
-    } else {
-      console.error("Failed to load MCP servers:", err);
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      console.error("Failed to load user MCP servers:", err);
     }
   }
+
+  console.log(`Loaded ${totalLoaded} MCP server(s)`);
 }
 
 async function checkNewMessages(since: string): Promise<string | null> {

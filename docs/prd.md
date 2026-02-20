@@ -16,6 +16,7 @@ The system is built on two principles:
 A single Node.js process per brian. No frameworks, no microservices, no databases. One runtime dependency (`@anthropic-ai/sdk`).
 
 Each brian runs a polling loop:
+
 1. Check Slack for new messages (HTTP call, near-zero cost)
 2. Process messages sequentially with the LLM (cost proportional to work)
 3. Run periodic heartbeat checks when due
@@ -108,11 +109,13 @@ The deploy script (`setup/deploy-self.sh`) handles the restart with automatic ro
 ## Multiple Brians
 
 Each brian is an independent process with its own:
+
 - `BRIAN_NAME` — identity (used in Slack messages and git commits)
 - `SLACK_CHANNEL_ID` — the channel it monitors
 - `~/.brian/` — local state (memory, conversation history)
 
 All brians share:
+
 - The same codebase and Slack bot token
 - The same GitHub credentials (`brian@grovina.com`)
 - The same machine (multiple processes, one VM)

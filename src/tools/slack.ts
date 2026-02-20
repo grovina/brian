@@ -15,10 +15,14 @@ export const slackReadTool: Tool = {
   definition: {
     name: "slack_read",
     description:
-      "Read messages from the Slack channel. Returns messages in chronological order with timestamps and usernames. Pass `oldest` (a Slack message timestamp) to only get messages after that point.",
+      "Read messages from a Slack channel. Pass `oldest` (a Slack message timestamp) to only get messages after that point. Use `users.conversations` via MCP to discover channels first if needed.",
     input_schema: {
       type: "object" as const,
       properties: {
+        channel: {
+          type: "string",
+          description: "The Slack channel ID to read from.",
+        },
         oldest: {
           type: "string",
           description:
@@ -29,12 +33,16 @@ export const slackReadTool: Tool = {
           description: "Maximum number of messages to return. Defaults to 50.",
         },
       },
-      required: [],
+      required: ["channel"],
     },
   },
   async execute(input): Promise<ToolResult> {
-    const { oldest, limit } = input as { oldest?: string; limit?: number };
-    const messages = await fetchMessages({ oldest, limit });
+    const { channel, oldest, limit } = input as {
+      channel: string;
+      oldest?: string;
+      limit?: number;
+    };
+    const messages = await fetchMessages({ channel, oldest, limit });
 
     if (messages.length === 0) return "No messages.";
 
@@ -51,7 +59,7 @@ export const slackReadTool: Tool = {
 
       if (hasImages(msg)) {
         for (const file of msg.files ?? []) {
-          if (!(file.mimetype in { "image/jpeg": 1, "image/jpg": 1, "image/png": 1, "image/gif": 1, "image/webp": 1 })) continue;
+          if (!(file.mimetype in SUPPORTED_IMAGE_LOOKUP)) continue;
           const image = await downloadImage(file.url_private);
           if (image) {
             blocks.push({
@@ -74,25 +82,37 @@ export const slackReadTool: Tool = {
   },
 };
 
+const SUPPORTED_IMAGE_LOOKUP: Record<string, true> = {
+  "image/jpeg": true,
+  "image/jpg": true,
+  "image/png": true,
+  "image/gif": true,
+  "image/webp": true,
+};
+
 export const slackPostTool: Tool = {
   name: "slack_post",
   definition: {
     name: "slack_post",
-    description: "Post a message to the Slack channel.",
+    description: "Post a message to a Slack channel.",
     input_schema: {
       type: "object" as const,
       properties: {
+        channel: {
+          type: "string",
+          description: "The Slack channel ID to post to.",
+        },
         text: {
           type: "string",
           description: "The message text to post. Supports Slack markdown.",
         },
       },
-      required: ["text"],
+      required: ["channel", "text"],
     },
   },
   async execute(input) {
-    const { text } = input as { text: string };
-    await sendMessage(text);
+    const { channel, text } = input as { channel: string; text: string };
+    await sendMessage(channel, text);
     return "Message posted.";
   },
 };
@@ -105,21 +125,30 @@ export const slackReactTool: Tool = {
     input_schema: {
       type: "object" as const,
       properties: {
+        channel: {
+          type: "string",
+          description: "The Slack channel ID where the message is.",
+        },
         timestamp: {
           type: "string",
           description: "The timestamp of the message to react to.",
         },
         emoji: {
           type: "string",
-          description: "The emoji name without colons (e.g. 'thumbsup', 'eyes', 'heart').",
+          description:
+            "The emoji name without colons (e.g. 'thumbsup', 'eyes', 'heart').",
         },
       },
-      required: ["timestamp", "emoji"],
+      required: ["channel", "timestamp", "emoji"],
     },
   },
   async execute(input) {
-    const { timestamp, emoji } = input as { timestamp: string; emoji: string };
-    await addReaction(timestamp, emoji);
+    const { channel, timestamp, emoji } = input as {
+      channel: string;
+      timestamp: string;
+      emoji: string;
+    };
+    await addReaction(channel, timestamp, emoji);
     return `Reacted with :${emoji}:`;
   },
 };

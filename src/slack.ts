@@ -11,6 +11,14 @@ const SUPPORTED_IMAGE_TYPES: Record<string, Anthropic.Base64ImageSource["media_t
   "image/webp": "image/webp",
 };
 
+export interface SlackChannel {
+  id: string;
+  name: string;
+  is_member: boolean;
+  is_im: boolean;
+  is_mpim: boolean;
+}
+
 export interface SlackMessage {
   ts: string;
   text?: string;
@@ -39,6 +47,34 @@ export async function api(
   return data;
 }
 
+export async function getJoinedChannels(): Promise<SlackChannel[]> {
+  const channels: SlackChannel[] = [];
+  let cursor: string | undefined;
+
+  do {
+    const params: Record<string, unknown> = {
+      types: "public_channel,private_channel,im,mpim",
+      exclude_archived: true,
+      limit: 200,
+    };
+    if (cursor) params.cursor = cursor;
+
+    const data = await api("users.conversations", params);
+    for (const ch of data.channels ?? []) {
+      channels.push({
+        id: ch.id,
+        name: ch.name || ch.id,
+        is_member: true,
+        is_im: ch.is_im ?? false,
+        is_mpim: ch.is_mpim ?? false,
+      });
+    }
+    cursor = data.response_metadata?.next_cursor;
+  } while (cursor);
+
+  return channels;
+}
+
 const userCache = new Map<string, string>();
 
 export async function resolveUser(userId: string): Promise<string> {
@@ -60,15 +96,16 @@ export async function resolveUser(userId: string): Promise<string> {
 }
 
 export interface FetchMessagesOptions {
+  channel: string;
   oldest?: string;
   limit?: number;
 }
 
 export async function fetchMessages(
-  options: FetchMessagesOptions = {}
+  options: FetchMessagesOptions
 ): Promise<SlackMessage[]> {
   const params: Record<string, unknown> = {
-    channel: config.slack.channelId,
+    channel: options.channel,
     limit: options.limit ?? 50,
   };
   if (options.oldest) params.oldest = options.oldest;
@@ -126,17 +163,17 @@ export function formatMessage(msg: SlackMessage, userName: string): string {
   return `[${time}] ${userName}: ${parts.join(" ")}`;
 }
 
-export async function sendMessage(text: string): Promise<void> {
+export async function sendMessage(channel: string, text: string): Promise<void> {
   await api("chat.postMessage", {
-    channel: config.slack.channelId,
+    channel,
     text,
     username: config.name,
   });
 }
 
-export async function addReaction(timestamp: string, emoji: string): Promise<void> {
+export async function addReaction(channel: string, timestamp: string, emoji: string): Promise<void> {
   await api("reactions.add", {
-    channel: config.slack.channelId,
+    channel,
     timestamp,
     name: emoji,
   });

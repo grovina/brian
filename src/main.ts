@@ -2,7 +2,7 @@ import "./logger.js";
 import { config } from "./config.js";
 import { runAgent } from "./agent.js";
 import { mcpManager } from "./mcp-client.js";
-import { fetchMessages } from "./slack.js";
+import { getJoinedChannels, fetchMessages, SlackChannel } from "./slack.js";
 import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -11,33 +11,35 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_DIR = path.resolve(__dirname, "..");
 
 const STATE_DIR = path.join(process.env.HOME || "/home/brian", ".brian");
-const TS_FILE = path.join(STATE_DIR, "last-slack-ts");
+const TS_FILE = path.join(STATE_DIR, "last-slack-ts.json");
 const USER_MCP_FILE = path.join(STATE_DIR, "mcp-servers.json");
 const KERNEL_MCP_DIR = path.join(APP_DIR, "mcp");
 
 const MIN_INTERVAL_MS = config.wakeIntervalMinutes * 60_000;
-const MAX_INTERVAL_MS = 30 * 60_000;  // extended from 15 to 30 min
+const MAX_INTERVAL_MS = 30 * 60_000;
 const BACKOFF_MULTIPLIER = 1.5;
-// Run agent proactively at least once per 2 hours even if no messages
 const PROACTIVE_INTERVAL_MS = 2 * 60 * 60_000;
+const CHANNEL_REFRESH_INTERVAL_MS = 15 * 60_000;
 
-async function loadLastTs(): Promise<string> {
+type ChannelTimestamps = Record<string, string>;
+
+async function loadTimestamps(): Promise<ChannelTimestamps> {
   try {
-    return (await fs.readFile(TS_FILE, "utf-8")).trim();
+    const data = await fs.readFile(TS_FILE, "utf-8");
+    return JSON.parse(data);
   } catch {
-    return String(Date.now() / 1000 - 60);
+    return {};
   }
 }
 
-async function saveLastTs(ts: string): Promise<void> {
+async function saveTimestamps(ts: ChannelTimestamps): Promise<void> {
   await fs.mkdir(STATE_DIR, { recursive: true });
-  await fs.writeFile(TS_FILE, ts);
+  await fs.writeFile(TS_FILE, JSON.stringify(ts, null, 2));
 }
 
 async function loadMCPServers(): Promise<void> {
   let totalLoaded = 0;
 
-  // Load kernel MCP servers from repo's mcp/ directory
   try {
     const files = await fs.readdir(KERNEL_MCP_DIR);
     for (const file of files.filter((f) => f.endsWith(".json"))) {
@@ -54,7 +56,6 @@ async function loadMCPServers(): Promise<void> {
     // No kernel mcp/ directory
   }
 
-  // Load user/org MCP servers from ~/.brian/mcp-servers.json
   try {
     const configData = await fs.readFile(USER_MCP_FILE, "utf-8");
     const mcpConfig = JSON.parse(configData);
@@ -73,40 +74,99 @@ async function loadMCPServers(): Promise<void> {
   console.log(`Loaded ${totalLoaded} MCP server(s)`);
 }
 
-async function checkNewMessages(since: string): Promise<string | null> {
-  try {
-    const msgs = await fetchMessages({ oldest: since, limit: 10 });
-    const newMsgs = msgs.filter((m) => !m.bot_id);
-    if (newMsgs.length === 0) return null;
-    return newMsgs[newMsgs.length - 1].ts;
-  } catch {
-    return null;
-  }
+interface ChannelActivity {
+  channel: SlackChannel;
+  newMessages: number;
+  latestTs: string;
 }
+
+async function checkAllChannels(
+  channels: SlackChannel[],
+  timestamps: ChannelTimestamps
+): Promise<ChannelActivity[]> {
+  const active: ChannelActivity[] = [];
+
+  for (const ch of channels) {
+    try {
+      const oldest = timestamps[ch.id];
+      const msgs = await fetchMessages({
+        channel: ch.id,
+        oldest,
+        limit: 10,
+      });
+      const newMsgs = msgs.filter((m) => !m.bot_id);
+      if (newMsgs.length > 0) {
+        active.push({
+          channel: ch,
+          newMessages: newMsgs.length,
+          latestTs: newMsgs[newMsgs.length - 1].ts,
+        });
+      }
+    } catch {
+      // Channel might be inaccessible — skip silently
+    }
+  }
+
+  return active;
+}
+
+function formatActivityContext(activity: ChannelActivity[]): string {
+  if (activity.length === 0) return "";
+
+  const lines = activity.map(
+    (a) => `- #${a.channel.name} (${a.channel.id}): ${a.newMessages} new message${a.newMessages > 1 ? "s" : ""}`
+  );
+  return `\nNew activity:\n${lines.join("\n")}`;
+}
+
+// --- startup ---
 
 console.log(`${config.name} starting up...`);
 await loadMCPServers();
 
-let lastTs = await loadLastTs();
+let channels: SlackChannel[] = [];
+try {
+  channels = await getJoinedChannels();
+  console.log(`Discovered ${channels.length} channel(s): ${channels.map((c) => `#${c.name}`).join(", ")}`);
+} catch (err) {
+  console.error("Failed to discover channels:", err);
+}
+
+let timestamps = await loadTimestamps();
 let currentIntervalMs = MIN_INTERVAL_MS;
 let lastAgentRunMs = Date.now();
+let lastChannelRefreshMs = Date.now();
 
 console.log(`${config.name} running — min ${config.wakeIntervalMinutes} min, max 30 min idle`);
 
 while (true) {
   try {
-    const latestTs = await checkNewMessages(lastTs);
+    // Periodically refresh channel list
+    if (Date.now() - lastChannelRefreshMs >= CHANNEL_REFRESH_INTERVAL_MS) {
+      try {
+        channels = await getJoinedChannels();
+        lastChannelRefreshMs = Date.now();
+        console.log(`Refreshed channels: ${channels.length} joined`);
+      } catch {
+        // Keep using stale list
+      }
+    }
+
+    const activity = await checkAllChannels(channels, timestamps);
     const timeSinceLastRun = Date.now() - lastAgentRunMs;
     const shouldRunProactive = timeSinceLastRun >= PROACTIVE_INTERVAL_MS;
 
-    if (latestTs || shouldRunProactive) {
+    if (activity.length > 0 || shouldRunProactive) {
       currentIntervalMs = MIN_INTERVAL_MS;
-      await runAgent();
+
+      const activityContext = formatActivityContext(activity);
+      await runAgent(activityContext);
       lastAgentRunMs = Date.now();
-      if (latestTs) {
-        lastTs = latestTs;
-        await saveLastTs(lastTs);
+
+      for (const a of activity) {
+        timestamps[a.channel.id] = a.latestTs;
       }
+      await saveTimestamps(timestamps);
     } else {
       currentIntervalMs = Math.min(
         Math.round(currentIntervalMs * BACKOFF_MULTIPLIER),

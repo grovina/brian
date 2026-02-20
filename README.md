@@ -29,8 +29,7 @@ Two tokens. That's all brian needs.
 
 ```bash
 export BRIAN_NAME=pickle-1
-export SLACK_TOKEN=xoxp-...          # User token (or xoxb- bot token)
-export SLACK_CHANNEL_ID=C0123456789
+export SLACK_TOKEN=xoxp-...          # Slack user token
 export ANTHROPIC_API_KEY=sk-ant-...
 export GITHUB_TOKEN=ghp_...
 export GITHUB_ORG=klauvi             # Optional — for config repo creation
@@ -38,13 +37,13 @@ export GITHUB_ORG=klauvi             # Optional — for config repo creation
 npm install && npm run build && npm start
 ```
 
-Brian boots up, connects to Slack and GitHub via MCP, loads any user MCP servers from `~/.brian/mcp-servers.json`, and starts polling for messages.
+Brian boots up, connects to Slack and GitHub via MCP, discovers all channels it's joined, loads any user MCP servers from `~/.brian/mcp-servers.json`, and starts working. No channel ID needed — brian finds its own way around.
 
 ## Architecture
 
 ```
 src/
-├── main.ts            # Polling loop — checks Slack, runs agent
+├── main.ts            # Wake loop — discovers channels, checks activity, runs agent
 ├── agent.ts           # LLM agent loop (Claude + tools, up to 80 turns)
 ├── config.ts          # Environment configuration
 ├── slack.ts           # Slack API client (polling, messages, images)
@@ -70,7 +69,7 @@ mcp/                   # Kernel MCP servers (shipped with brian)
 │   └── memory/        # Daily logs (YYYY-MM-DD.md)
 ├── mcp-servers.json   # Additional MCP servers (from config repo)
 ├── conversation-history.json
-├── last-slack-ts
+├── last-slack-ts.json   # Per-channel read positions
 └── logs/
 ```
 
@@ -88,19 +87,18 @@ Server configs support `${VAR}` env var resolution in the `env` field.
 | Variable | Required | Description |
 |---|---|---|
 | `BRIAN_NAME` | No | Identity (default: `brian`) |
-| `SLACK_TOKEN` | Yes | Slack token — user (`xoxp-`) or bot (`xoxb-`) |
-| `SLACK_CHANNEL_ID` | Yes | Slack channel to monitor |
+| `SLACK_TOKEN` | Yes | Slack user token (`xoxp-`) |
 | `ANTHROPIC_API_KEY` | Yes | Anthropic API key |
 | `GITHUB_TOKEN` | No | GitHub personal access token |
 | `GITHUB_ORG` | No | GitHub org for config repo |
 | `BRIAN_MODEL` | No | LLM model (default: `claude-sonnet-4-6`) |
-| `WAKE_INTERVAL_MINUTES` | No | Min polling interval (default: `3`) |
+| `WAKE_INTERVAL_MINUTES` | No | Min wake interval (default: `3`) |
 
-`SLACK_BOT_TOKEN` is accepted as a fallback for `SLACK_TOKEN` (backwards compatible).
+Brian auto-discovers all Slack channels it's joined — no channel ID needed.
 
 ## Multiple Brians
 
-Each brian is an independent process with its own `BRIAN_NAME` and `SLACK_CHANNEL_ID`. They share the same Slack token and codebase. Deploy multiple instances with different env configs.
+Each brian is an independent process with its own `BRIAN_NAME`. They share the same Slack token and codebase but maintain separate state in `~/.brian/`. Deploy multiple instances with different env configs — each discovers its own channels and works independently.
 
 ## How Brians Evolve the Kernel
 

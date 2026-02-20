@@ -171,7 +171,7 @@ async function logStats(stats: {
 
 loadConversationState().catch(console.error);
 
-export async function runAgent(): Promise<void> {
+export async function runAgent(activityContext?: string): Promise<void> {
   const startTime = Date.now();
   const systemPrompt = await buildSystemPrompt();
 
@@ -192,7 +192,11 @@ export async function runAgent(): Promise<void> {
     conversationHistory.pop();
   }
 
-  conversationHistory.push({ role: "user", content: `[${wake}]` });
+  const wakeMessage = activityContext
+    ? `[${wake}]${activityContext}`
+    : `[${wake}] No new activity — proactive wake.`;
+
+  conversationHistory.push({ role: "user", content: wakeMessage });
 
   let toolCalls = 0;
   let tokensIn = 0;

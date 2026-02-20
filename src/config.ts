@@ -18,8 +18,7 @@ export const config = {
   name: optional("BRIAN_NAME", "brian"),
   wakeIntervalMinutes: Number(optional("WAKE_INTERVAL_MINUTES", "3")),
   slack: {
-    token: process.env.SLACK_TOKEN || required("SLACK_BOT_TOKEN"),
-    channelId: required("SLACK_CHANNEL_ID"),
+    token: required("SLACK_TOKEN"),
   },
   anthropic: {
     apiKey: required("ANTHROPIC_API_KEY"),

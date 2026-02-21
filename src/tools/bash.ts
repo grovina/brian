@@ -1,5 +1,5 @@
 import { spawn } from "child_process";
-import type { Tool } from "./index.js";
+import type { Tool } from "../types.js";
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -21,13 +21,8 @@ function exec(
     let stdout = "";
     let stderr = "";
 
-    proc.stdout.on("data", (data) => {
-      stdout += data.toString();
-    });
-
-    proc.stderr.on("data", (data) => {
-      stderr += data.toString();
-    });
+    proc.stdout.on("data", (data) => (stdout += data.toString()));
+    proc.stderr.on("data", (data) => (stderr += data.toString()));
 
     proc.on("close", (code) => {
       const output = [stdout, stderr].filter(Boolean).join("\n");
@@ -49,7 +44,7 @@ export const bashTool: Tool = {
   definition: {
     name: "bash",
     description:
-      "Execute a shell command on the VM. Has access to git, docker, node, and standard unix tools. Commands run as the brain user with full access to the filesystem.",
+      "Execute a shell command. Has access to git, docker, node, and standard unix tools.",
     parameters: {
       type: "object",
       properties: {
@@ -59,11 +54,11 @@ export const bashTool: Tool = {
         },
         working_directory: {
           type: "string",
-          description: "Working directory for the command. Defaults to the current project directory.",
+          description: "Working directory for the command",
         },
         timeout_seconds: {
           type: "number",
-          description: "Timeout in seconds. Defaults to 300 (5 minutes).",
+          description: "Timeout in seconds (default: 300)",
         },
       },
       required: ["command"],
@@ -75,7 +70,6 @@ export const bashTool: Tool = {
       working_directory?: string;
       timeout_seconds?: number;
     };
-    const timeoutMs = (timeout_seconds || 300) * 1000;
-    return exec(command, working_directory, timeoutMs);
+    return exec(command, working_directory, (timeout_seconds || 300) * 1000);
   },
 };

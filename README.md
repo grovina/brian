@@ -1,127 +1,126 @@
 # Brian
 
-The kernel for autonomous AI coworkers. Clone it, give it two tokens, and you have an independent agent that communicates on Slack, manages code on GitHub, and can improve itself.
-
-Brian is not a framework, not a library — it's a running process. A coworker that happens to be software.
-
-## Two-Repo Model
-
-Brian is designed around a clean separation:
-
-**This repo (the kernel)** — the strong base that any brian needs:
-- Agent loop (LLM + tool execution, conversation state)
-- Core tools: `bash`, `files`, `memory`, `self_deploy`
-- Slack + GitHub MCP servers (shipped in `mcp/`)
-- MCP client for loading additional tools
-- Memory system, system prompt builder, polling loop
-
-**`{org}/brian-config` (extensions)** — org-specific configuration:
-- Additional MCP servers (Linear, Chrome DevTools, etc.)
-- Custom instructions and persona
-- VM setup and deployment scripts
-- Anything specific to the team
-
-For the human doing initial setup: `docs/setup.md`. Once deployed, Brian handles its own onboarding: `docs/onboarding.md`.
+Framework for autonomous AI coworkers. Brian is not a chatbot — it's the foundation for building persistent, autonomous agents that wake up, look around, decide what to do, and act.
 
 ## Quick Start
 
-Two tokens. That's all brian needs.
+Create a brian for your organization:
 
 ```bash
-export BRIAN_NAME=pickle-1
-export SLACK_TOKEN=xoxp-...          # Slack user token
-export GCP_PROJECT=your-project      # Vertex AI — no API key needed
-export GITHUB_TOKEN=ghp_...
-export GITHUB_ORG=klauvi             # Optional
-
-npm install && npm run build && npm start
+curl -fsSL https://raw.githubusercontent.com/grovina/brian/main/bootstrap.sh | bash
 ```
 
-Brian boots up, connects to Vertex AI (Gemini), Slack and GitHub via MCP, discovers all channels it's joined, loads any user MCP servers from `~/.brian/mcp-servers.json`, and starts working.
+The script sets up a new project, installs dependencies, and leaves you with a ready-to-deploy brian.
+
+## What You Get
+
+A brian built on this framework is a long-running process that:
+
+- **Wakes up on a schedule** — checks communication channels, ongoing tasks, notifications
+- **Acts autonomously** — uses tools (bash, MCP servers, memory) to get work done
+- **Controls its own schedule** — sleeps longer when idle, checks back quickly when busy
+- **Remembers across restarts** — persistent memory, conversation history, daily logs
+- **Improves itself** — can modify its own code, open PRs, and self-deploy
+
+## Usage
+
+```typescript
+import { Brian, VertexAI, PeriodicWake, bash, selfDeploy } from 'brian';
+
+const brian = new Brian({
+  name: process.env.BRIAN_NAME || 'brian',
+
+  model: new VertexAI({
+    project: process.env.GCP_PROJECT!,
+    region: process.env.GCP_REGION || 'europe-west1',
+  }),
+
+  wake: new PeriodicWake({
+    intervalMinutes: 3,
+    maxIntervalMinutes: 60,
+  }),
+
+  tools: [bash, selfDeploy()],
+
+  mcp: './mcp/',
+  instructions: './instructions.md',
+});
+
+await brian.start();
+```
 
 ## Architecture
 
 ```
 src/
-├── main.ts            # Wake loop — discovers channels, checks activity, runs agent
-├── agent.ts           # LLM agent loop (Claude + tools, up to 80 turns)
-├── config.ts          # Environment configuration
-├── slack.ts           # Slack API client (polling, messages, images)
-├── system-prompt.ts   # Dynamic prompt from identity + memory
-├── memory.ts          # ~/.brian/workspace/ — MEMORY.md + daily logs
-├── mcp-client.ts      # MCP server manager (loads kernel + user servers)
-├── logger.ts          # File + console logging
+├── index.ts              # Public API
+├── brian.ts              # Brian class — orchestrates everything
+├── types.ts              # Core interfaces
+├── agent.ts              # Model-agnostic agent loop
+├── prompt.ts             # System prompt builder
+├── memory.ts             # Workspace: MEMORY.md, HEARTBEAT.md, daily logs
+├── mcp.ts                # MCP server manager
+├── logger.ts             # File + console logging
+├── models/
+│   └── vertex-ai.ts      # VertexAI (Gemini) provider
+├── wake/
+│   └── periodic.ts       # Periodic wake with backoff
 └── tools/
-    ├── bash.ts        # Shell command execution
-    ├── files.ts       # Read/write/list files
-    ├── memory.ts      # Read/write/search memory
-    ├── self-deploy.ts # Pull + rebuild + restart
-    └── slack.ts       # Read/post/react on Slack
-
-mcp/                   # Kernel MCP servers (shipped with brian)
-├── slack.json         # Slack — uses $SLACK_TOKEN
-└── github.json        # GitHub — uses $GITHUB_TOKEN
-
-~/.brian/              # Live instance state (per machine, outside repo)
-├── workspace/
-│   ├── MEMORY.md      # Long-term memory
-│   ├── HEARTBEAT.md   # Periodic checklist
-│   └── memory/        # Daily logs (YYYY-MM-DD.md)
-├── mcp-servers.json   # Additional MCP servers (from config repo)
-├── conversation-history.json
-├── last-slack-ts.json   # Per-channel read positions
-└── logs/
+    ├── bash.ts           # Shell execution
+    ├── memory.ts         # Memory read/write/search (built-in)
+    └── self-deploy.ts    # Self-deployment trigger
 ```
 
-## MCP Servers
+## Core Concepts
 
-Brian loads MCP servers from two sources:
+### Model Providers
 
-1. **Kernel** (`mcp/*.json`) — Slack and GitHub, shipped with Brian
-2. **User** (`~/.brian/mcp-servers.json`) — additional servers from the org's config repo
+Implement `ModelProvider` to add LLM backends. The framework ships with `VertexAI` (Gemini via Google Cloud).
 
-Server configs support `${VAR}` env var resolution in the `env` field.
+### Wake Strategies
 
-## Environment Variables
+Implement `WakeStrategy` to control when brian wakes up. The framework ships with `PeriodicWake` — a timer with configurable backoff. Brian can also control its own schedule via the built-in `set_wake_interval` tool.
 
-| Variable | Required | Description |
-|---|---|---|
-| `BRIAN_NAME` | No | Identity (default: `brian`) |
-| `SLACK_TOKEN` | Yes | Slack user token (`xoxp-`) |
-| `GCP_PROJECT` | Yes | GCP project ID for Vertex AI |
-| `GCP_REGION` | No | Vertex AI region (default: `europe-west1`) |
-| `GITHUB_TOKEN` | No | GitHub personal access token |
-| `GITHUB_ORG` | No | GitHub org for config repo |
-| `BRIAN_MODEL` | No | LLM model (default: `gemini-3-flash-preview`) |
-| `WAKE_INTERVAL_MINUTES` | No | Min wake interval (default: `3`) |
+### Tools
 
-On a GCE VM, Vertex AI auth is automatic via IAM — no API key needed. For local dev, run `gcloud auth application-default login`.
+Brian has three kinds of tools:
 
-Brian auto-discovers all Slack channels it's joined — no channel ID needed.
+1. **Built-in** — memory (read/write/search) and wake interval control. Always available.
+2. **Framework tools** — `bash` and `selfDeploy()`. Opt-in.
+3. **MCP tools** — loaded from JSON configs. Any MCP-compatible server works.
 
-## Multiple Brians
+Custom tools implement the `Tool` interface:
 
-Each brian is an independent process with its own `BRIAN_NAME`. They share the same Slack token and codebase but maintain separate state in `~/.brian/`. Deploy multiple instances with different env configs — each discovers its own channels and works independently.
-
-## How Brians Evolve the Kernel
-
-This repo is the living room where brians discuss and negotiate how the kernel grows:
-
-- **Issues** — propose changes, discuss trade-offs
-- **Pull Requests** — implement and submit improvements
-- **The boundary between kernel and extensions is negotiated organically** — if something is useful for all brians, it moves into the kernel; if it's org-specific, it stays in the config repo
-
-Brians are contributors to their own codebase. They identify friction, propose improvements, and submit PRs — just like any open-source contributor.
-
-## Development
-
-```bash
-npm install
-npm run dev          # Run with tsx (hot reload)
-npm run build        # Compile TypeScript
-npm start            # Run compiled output
-npm run typecheck    # Type checking only
+```typescript
+const myTool: Tool = {
+  name: 'my_tool',
+  definition: {
+    name: 'my_tool',
+    description: 'Does something useful',
+    parameters: { type: 'object', properties: { ... }, required: [...] },
+  },
+  async execute(input) {
+    return 'result';
+  },
+};
 ```
+
+### State
+
+Brian stores state in `~/.brian/` (configurable via `stateDir`):
+
+```
+~/.brian/
+├── MEMORY.md                     # Long-term knowledge
+├── HEARTBEAT.md                  # Periodic checklist
+├── memory/YYYY-MM-DD.md          # Daily logs
+├── conversation-history.json     # Persistent conversation
+└── logs/                         # Process logs
+```
+
+## Contributing
+
+Brian is open source. If your brian identifies improvements that would benefit all brians, open an issue or PR. The framework stays org-agnostic — org-specific configuration belongs in your project repo, not here.
 
 ## License
 

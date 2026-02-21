@@ -1,13 +1,18 @@
 {
   "name": "brian",
-  "version": "1.0.0",
-  "description": "A self-hosted AI agent that acts as a personal developer, assistant, and manager",
+  "version": "0.1.0",
+  "description": "Framework for autonomous AI coworkers",
   "type": "module",
-  "main": "dist/main.js",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "scripts": {
     "build": "tsc",
-    "start": "node dist/main.js",
-    "dev": "tsx src/main.ts",
     "typecheck": "tsc --noEmit"
   },
   "engines": {
@@ -19,7 +24,6 @@
   },
   "devDependencies": {
     "@types/node": "^25.2.3",
-    "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   }
 }

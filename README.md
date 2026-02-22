@@ -4,13 +4,14 @@ Framework for autonomous AI coworkers. Brian is not a chatbot — it's the found
 
 ## Quick Start
 
-Create a brian for your organization:
-
 ```bash
 curl -fsSL https://raw.githubusercontent.com/grovina/brian/main/bootstrap.sh | bash
 ```
 
-The script sets up a new project, installs dependencies, and leaves you with a ready-to-deploy brian.
+The bootstrap script forks this repo to your org, scaffolds your brian's project, and installs everything. You end up with two repos:
+
+- **`your-org/brian`** — your fork of the framework (editable, stays in sync with upstream)
+- **`your-org/pickle`** — your brian's implementation (name, instructions, MCP configs, deploy scripts)
 
 ## What You Get
 
@@ -118,9 +119,18 @@ Brian stores state in `~/.brian/` (configurable via `stateDir`):
 └── logs/                         # Process logs
 ```
 
-## Contributing
+## How Contributions Flow
 
-Brian is open source. If your brian identifies improvements that would benefit all brians, open an issue or PR. The framework stays org-agnostic — org-specific configuration belongs in your project repo, not here.
+Each org forks this repo. The fork is a first-class, editable copy — not a read-only dependency.
+
+When a brian identifies a generic improvement:
+
+1. It makes the change in the org's fork
+2. The improvement is live immediately for that org
+3. It opens a PR from the fork to this upstream repo
+4. Once merged, all forks benefit
+
+The framework stays org-agnostic. Org-specific configuration belongs in your brian's project repo, not in the fork.
 
 ## License
 

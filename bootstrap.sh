@@ -1,18 +1,26 @@
 #!/bin/bash
 set -euo pipefail
 
-# --- helpers ---
+# --- formatting ---
 
 bold() { printf "\033[1m%s\033[0m" "$1"; }
 dim() { printf "\033[2m%s\033[0m" "$1"; }
 green() { printf "\033[32m%s\033[0m" "$1"; }
+red() { printf "\033[31m%s\033[0m" "$1"; }
+yellow() { printf "\033[33m%s\033[0m" "$1"; }
+
+step() { printf "\n  %s %s\n" "$(bold "→")" "$(bold "$1")"; }
+ok() { printf "    %s %s\n" "$(green "✓")" "$1"; }
+skip() { printf "    %s %s\n" "$(dim "·")" "$(dim "$1")"; }
+fail() { printf "    %s %s\n" "$(red "✗")" "$1"; }
+info() { printf "    %s\n" "$1"; }
 
 ask() {
   local prompt="$1" default="${2:-}" var_name="$3"
   if [[ -n "$default" ]]; then
-    printf "  %s %s: " "$(bold "$prompt")" "$(dim "(default: $default)")"
+    printf "    %s %s: " "$(bold "$prompt")" "$(dim "$default")"
   else
-    printf "  %s: " "$(bold "$prompt")"
+    printf "    %s: " "$(bold "$prompt")"
   fi
   read -r value
   eval "$var_name=\"${value:-$default}\""
@@ -20,37 +28,148 @@ ask() {
 
 ask_secret() {
   local prompt="$1" var_name="$2"
-  printf "  %s: " "$(bold "$prompt")"
+  printf "    %s: " "$(bold "$prompt")"
   read -rs value
   echo
   eval "$var_name=\"$value\""
 }
 
-check() { green "  ✓ $1"; echo; }
+confirm() {
+  printf "\n  %s " "$(bold "$1 (Y/n)")"
+  read -r answer
+  [[ -z "$answer" || "$answer" =~ ^[Yy] ]]
+}
 
-# --- main ---
+# ─────────────────────────────────────────────────
+# Phase 1: Prerequisites
+# ─────────────────────────────────────────────────
 
 echo
 echo "  ┌─────────────────────────┐"
 echo "  │   create a new brian    │"
 echo "  └─────────────────────────┘"
-echo
 
+step "Checking prerequisites"
+
+HAS_GH=false
+
+if ! command -v node &>/dev/null; then
+  fail "node not found — install Node.js 22+ from https://nodejs.org"
+  exit 1
+fi
+
+NODE_VERSION=$(node -v | sed 's/v//' | cut -d. -f1)
+if (( NODE_VERSION < 22 )); then
+  fail "node $(node -v) found — need v22+"
+  exit 1
+fi
+ok "node $(node -v)"
+
+if ! command -v npm &>/dev/null; then
+  fail "npm not found"
+  exit 1
+fi
+ok "npm $(npm -v)"
+
+if ! command -v git &>/dev/null; then
+  fail "git not found"
+  exit 1
+fi
+ok "git"
+
+if command -v gh &>/dev/null; then
+  if gh auth status &>/dev/null; then
+    HAS_GH=true
+    ok "gh (authenticated)"
+  else
+    skip "gh found but not authenticated — skipping GitHub steps"
+    info "Run $(bold "gh auth login") to enable GitHub integration"
+  fi
+else
+  skip "gh not found — skipping GitHub steps"
+  info "Install from https://cli.github.com to enable GitHub integration"
+fi
+
+# ─────────────────────────────────────────────────
+# Phase 2: Gather inputs
+# ─────────────────────────────────────────────────
+
+step "Configuration"
+
+ask "github org" "" GITHUB_ORG
 ask "brian name" "brian" BRIAN_NAME
-ask "project directory" "${BRIAN_NAME}" PROJECT_DIR
+
 echo
 ask_secret "slack token (xoxp-...)" SLACK_TOKEN
 ask "gcp project" "" GCP_PROJECT
 ask "gcp region" "europe-west1" GCP_REGION
-ask "github token (optional)" "" GITHUB_TOKEN
-ask "github org (optional)" "" GITHUB_ORG
-echo
+ask_secret "github token" GITHUB_TOKEN
 
-# --- scaffold ---
+# Validate required fields
+MISSING=()
+[[ -z "$BRIAN_NAME" ]] && MISSING+=("brian name")
+[[ -z "$SLACK_TOKEN" ]] && MISSING+=("slack token")
+[[ -z "$GCP_PROJECT" ]] && MISSING+=("gcp project")
+
+if (( ${#MISSING[@]} > 0 )); then
+  echo
+  fail "Missing required fields: ${MISSING[*]}"
+  exit 1
+fi
+
+# ─────────────────────────────────────────────────
+# Phase 3: Confirm plan
+# ─────────────────────────────────────────────────
+
+PROJECT_DIR="${BRIAN_NAME}"
+BRIAN_DEP="github:grovina/brian"
+
+step "Plan"
+
+if [[ -n "$GITHUB_ORG" ]] && $HAS_GH; then
+  BRIAN_DEP="github:${GITHUB_ORG}/brian"
+  info "Fork $(bold "grovina/brian") → $(bold "${GITHUB_ORG}/brian")"
+  info "Create repo $(bold "${GITHUB_ORG}/${BRIAN_NAME}") (private)"
+fi
+
+info "Create project $(bold "${PROJECT_DIR}/") with:"
+info "  src/main.ts, instructions.md, mcp/, setup/, please"
+info "Dependency: $(bold "$BRIAN_DEP")"
+info "Install npm packages"
+
+if [[ -d "$PROJECT_DIR" ]]; then
+  echo
+  yellow "    ⚠ Directory '$PROJECT_DIR' already exists — files will be overwritten"
+fi
+
+if ! confirm "Proceed?"; then
+  echo "  Cancelled."
+  exit 0
+fi
+
+# ─────────────────────────────────────────────────
+# Phase 4: Execute
+# ─────────────────────────────────────────────────
+
+# --- Fork ---
+
+if [[ -n "$GITHUB_ORG" ]] && $HAS_GH; then
+  step "Forking framework"
+
+  if gh repo view "${GITHUB_ORG}/brian" &>/dev/null; then
+    skip "Fork ${GITHUB_ORG}/brian already exists"
+  else
+    gh repo fork grovina/brian --org "$GITHUB_ORG" --clone=false 2>/dev/null
+    ok "Forked → ${GITHUB_ORG}/brian"
+  fi
+fi
+
+# --- Scaffold files ---
+
+step "Scaffolding project"
 
 mkdir -p "$PROJECT_DIR/src" "$PROJECT_DIR/mcp" "$PROJECT_DIR/setup"
 
-# package.json
 cat > "$PROJECT_DIR/package.json" << PKGJSON
 {
   "name": "${BRIAN_NAME}",
@@ -68,7 +187,7 @@ cat > "$PROJECT_DIR/package.json" << PKGJSON
     "node": ">=22"
   },
   "dependencies": {
-    "brian": "github:grovina/brian"
+    "brian": "${BRIAN_DEP}"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
@@ -77,9 +196,8 @@ cat > "$PROJECT_DIR/package.json" << PKGJSON
   }
 }
 PKGJSON
-check "package.json"
+ok "package.json"
 
-# tsconfig.json
 cat > "$PROJECT_DIR/tsconfig.json" << 'TSCONFIG'
 {
   "compilerOptions": {
@@ -97,9 +215,8 @@ cat > "$PROJECT_DIR/tsconfig.json" << 'TSCONFIG'
   "exclude": ["node_modules", "dist"]
 }
 TSCONFIG
-check "tsconfig.json"
+ok "tsconfig.json"
 
-# src/main.ts
 cat > "$PROJECT_DIR/src/main.ts" << MAIN
 import { Brian, VertexAI, PeriodicWake, bash, selfDeploy } from 'brian';
 
@@ -124,10 +241,27 @@ const brian = new Brian({
 
 await brian.start();
 MAIN
-check "src/main.ts"
+ok "src/main.ts"
 
-# instructions.md
-cat > "$PROJECT_DIR/instructions.md" << 'INSTRUCTIONS'
+if [[ -n "$GITHUB_ORG" ]]; then
+  cat > "$PROJECT_DIR/instructions.md" << INSTRUCTIONS
+## First Run
+
+This is your first deployment. Introduce yourself on Slack, explain what you
+can do, and ask the team what they need. Once you've done that, remove this
+section and commit the change.
+
+## About
+
+You're built on the brian framework. Your org has a fork at
+github.com/${GITHUB_ORG}/brian (upstream: github.com/grovina/brian).
+
+When you identify improvements that would benefit all brians, make changes
+in the fork and open a PR to upstream. Keep the fork in sync with upstream
+by periodically pulling from grovina/brian.
+INSTRUCTIONS
+else
+  cat > "$PROJECT_DIR/instructions.md" << 'INSTRUCTIONS'
 ## First Run
 
 This is your first deployment. Introduce yourself on Slack, explain what you
@@ -140,9 +274,9 @@ You're built on the brian framework (github.com/grovina/brian). When you
 identify improvements that would benefit all brians, clone the framework
 repo, make changes, and open a PR.
 INSTRUCTIONS
-check "instructions.md"
+fi
+ok "instructions.md"
 
-# MCP configs
 if [[ -n "$SLACK_TOKEN" ]]; then
   cat > "$PROJECT_DIR/mcp/slack.json" << 'MCPSLACK'
 {
@@ -154,7 +288,7 @@ if [[ -n "$SLACK_TOKEN" ]]; then
   }
 }
 MCPSLACK
-  check "mcp/slack.json"
+  ok "mcp/slack.json"
 fi
 
 if [[ -n "$GITHUB_TOKEN" ]]; then
@@ -168,10 +302,9 @@ if [[ -n "$GITHUB_TOKEN" ]]; then
   }
 }
 MCPGITHUB
-  check "mcp/github.json"
+  ok "mcp/github.json"
 fi
 
-# .env
 cat > "$PROJECT_DIR/.env" << DOTENV
 BRIAN_NAME=${BRIAN_NAME}
 SLACK_TOKEN=${SLACK_TOKEN}
@@ -180,9 +313,8 @@ GCP_REGION=${GCP_REGION}
 GITHUB_TOKEN=${GITHUB_TOKEN}
 GITHUB_ORG=${GITHUB_ORG}
 DOTENV
-check ".env"
+ok ".env"
 
-# .env.example
 cat > "$PROJECT_DIR/.env.example" << 'DOTENVEX'
 BRIAN_NAME=brian
 SLACK_TOKEN=xoxp-...
@@ -191,17 +323,15 @@ GCP_REGION=europe-west1
 GITHUB_TOKEN=ghp_...
 GITHUB_ORG=your-org
 DOTENVEX
-check ".env.example"
+ok ".env.example"
 
-# .gitignore
 cat > "$PROJECT_DIR/.gitignore" << 'GITIGNORE'
 node_modules/
 dist/
 .env
 GITIGNORE
-check ".gitignore"
+ok ".gitignore"
 
-# setup/deploy-self.sh
 cat > "$PROJECT_DIR/setup/deploy-self.sh" << 'DEPLOY'
 #!/bin/bash
 set -e
@@ -226,12 +356,11 @@ if ! systemctl is-active --quiet brian; then
 fi
 DEPLOY
 chmod +x "$PROJECT_DIR/setup/deploy-self.sh"
-check "setup/deploy-self.sh"
+ok "setup/deploy-self.sh"
 
-# setup/brian.service
 cat > "$PROJECT_DIR/setup/brian.service" << SERVICE
 [Unit]
-Description=Brian AI Agent (${BRIAN_NAME})
+Description=${BRIAN_NAME}
 After=network.target
 
 [Service]
@@ -248,9 +377,8 @@ StartLimitIntervalSec=60
 [Install]
 WantedBy=multi-user.target
 SERVICE
-check "setup/brian.service"
+ok "setup/brian.service"
 
-# please
 cat > "$PROJECT_DIR/please" << 'PLEASE'
 #!/bin/bash
 set -euo pipefail
@@ -306,7 +434,7 @@ run_provision() {
 
   local REPO_URL
   if [[ -n "${GITHUB_ORG:-}" && -n "${GITHUB_TOKEN:-}" ]]; then
-    REPO_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_ORG}/brian.git"
+    REPO_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_ORG}/${BRIAN_NAME}.git"
   else
     REPO_URL="$(git remote get-url origin 2>/dev/null || echo '')"
   fi
@@ -314,8 +442,16 @@ run_provision() {
   echo "Configuring git..."
   $REMOTE_SSH "
     sudo -u brian git config --global user.name '${BRIAN_NAME}' &&
-    sudo -u brian git config --global user.email 'brian@$(echo ${GITHUB_ORG:-local}).com'
+    sudo -u brian git config --global user.email '${BRIAN_NAME}@${GITHUB_ORG:-local}.com'
   "
+
+  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    $REMOTE_SSH "
+      sudo -u brian git config --global credential.helper store &&
+      echo 'https://x-access-token:${GITHUB_TOKEN}@github.com' | sudo -u brian tee /home/brian/.git-credentials > /dev/null &&
+      sudo chmod 600 /home/brian/.git-credentials
+    "
+  fi
 
   if [[ -n "$REPO_URL" ]]; then
     echo "Cloning and building..."
@@ -329,6 +465,7 @@ run_provision() {
           cd /home/brian/app
         fi
         npm install && npm run build
+        mkdir -p /home/brian/projects
         cp setup/deploy-self.sh /home/brian/deploy-self.sh
         chmod +x /home/brian/deploy-self.sh
       '
@@ -454,25 +591,68 @@ case "${1:-help}" in
 esac
 PLEASE
 chmod +x "$PROJECT_DIR/please"
-check "please"
+ok "please"
 
-# --- install ---
+# --- Git + GitHub ---
 
+if [[ -n "$GITHUB_ORG" ]] && $HAS_GH; then
+  step "Creating GitHub repo"
+
+  cd "$PROJECT_DIR"
+
+  if [[ ! -d .git ]]; then
+    git init -q
+  fi
+
+  git add -A
+  git commit -q -m "initial ${BRIAN_NAME}" --allow-empty 2>/dev/null || true
+
+  if gh repo view "${GITHUB_ORG}/${BRIAN_NAME}" &>/dev/null; then
+    skip "Repo ${GITHUB_ORG}/${BRIAN_NAME} already exists"
+    git remote add origin "https://github.com/${GITHUB_ORG}/${BRIAN_NAME}.git" 2>/dev/null || true
+    git push -u origin main 2>/dev/null || true
+  else
+    gh repo create "${GITHUB_ORG}/${BRIAN_NAME}" --private --source=. --push
+    ok "Created ${GITHUB_ORG}/${BRIAN_NAME}"
+  fi
+else
+  cd "$PROJECT_DIR"
+  if [[ ! -d .git ]]; then
+    git init -q
+    git add -A
+    git commit -q -m "initial ${BRIAN_NAME}"
+    ok "Initialized local git repo"
+  fi
+fi
+
+# --- Install ---
+
+step "Installing dependencies"
+
+npm install 2>&1 | tail -3
+ok "npm install"
+
+# ─────────────────────────────────────────────────
+# Phase 5: Summary
+# ─────────────────────────────────────────────────
+
+step "Done!"
 echo
-echo "  Installing dependencies..."
-cd "$PROJECT_DIR"
-npm install --silent 2>&1 | tail -1
-check "npm install"
-
+info "$(bold "$BRIAN_NAME") is ready in $(bold "./$PROJECT_DIR/")"
 echo
-echo "  ┌─────────────────────────────────────────┐"
-echo "  │  $(green "Done!") Your brian is ready.              │"
-echo "  │                                         │"
-echo "  │  cd $PROJECT_DIR"
-echo "  │  npm run dev        # run locally        │"
-echo "  │  ./please deploy gcp  # deploy to GCP   │"
-echo "  │                                         │"
-echo "  │  ${BRIAN_NAME} will introduce itself on Slack  │"
-echo "  │  and help you set up everything else.   │"
-echo "  └─────────────────────────────────────────┘"
+
+if [[ -n "$GITHUB_ORG" ]] && $HAS_GH; then
+  info "$(dim "repos:")"
+  info "  $(bold "${GITHUB_ORG}/brian")          framework fork"
+  info "  $(bold "${GITHUB_ORG}/${BRIAN_NAME}")   ${BRIAN_NAME}'s project"
+  echo
+fi
+
+info "$(dim "next steps:")"
+info "  $(bold "cd ${PROJECT_DIR}")"
+info "  $(bold "npm run dev")              run locally"
+info "  $(bold "./please deploy gcp")      deploy to a GCP VM"
+echo
+info "${BRIAN_NAME} will introduce itself on Slack"
+info "and help set up everything else."
 echo

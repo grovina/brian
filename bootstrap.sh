@@ -107,25 +107,37 @@ fi
 
 step "Configuration"
 
-ask "GitHub org (repos will be created here)" "" GITHUB_ORG
+ask_required "GitHub org" "" GITHUB_ORG
+
+# Inherit defaults from sibling bots in the same org
+if [[ -n "$GITHUB_ORG" ]]; then
+  for f in ~/.brian/${GITHUB_ORG}.*.env; do
+    if [[ -f "$f" ]]; then
+      source "$f"
+      unset BRIAN_NAME
+      skip "Loaded defaults from $(basename "$f")"
+      break
+    fi
+  done
+fi
 
 while true; do
-  ask_required "bot name (also the repo and VM name)" "" BRIAN_NAME
-  if [[ "$BRIAN_NAME" == "brian" ]]; then
-    fail "Name can't be 'brian' — it conflicts with the framework fork repo"
-    info "Pick a name that's unique to your org (e.g. brianna, jarvis, friday)"
-    BRIAN_NAME=""
-  else
-    break
-  fi
+  ask_required "bot name" "" BRIAN_NAME
+  [[ "$BRIAN_NAME" != "brian" ]] && break
+  fail "Name can't be 'brian' — it conflicts with the framework fork repo"
+  BRIAN_NAME=""
 done
 
-ask_required "GCP project" "" GCP_PROJECT
-ask "GCP region" "europe-west1" GCP_REGION
+# Load exact match if this bot was set up before
+mkdir -p ~/.brian
+ENV_FILE=~/.brian/${GITHUB_ORG}.${BRIAN_NAME}.env
+[[ -f "$ENV_FILE" ]] && source "$ENV_FILE"
+
+ask_required "GCP project" "${GCP_PROJECT:-}" GCP_PROJECT
+ask "GCP region" "${GCP_REGION:-europe-west1}" GCP_REGION
 
 if ! gcloud projects describe "$GCP_PROJECT" &>/dev/null; then
   fail "Cannot access GCP project '$GCP_PROJECT'"
-  info "Check the project ID and your permissions, then re-run."
   exit 1
 fi
 ok "GCP project $GCP_PROJECT"
@@ -134,29 +146,28 @@ info "Enabling required APIs..."
 gcloud services enable compute.googleapis.com --project="$GCP_PROJECT" 2>/dev/null
 ok "Compute Engine API"
 
-echo
-ask_choice "model provider" MODEL_CHOICE "Vertex AI (Gemini)" "Anthropic (Claude)"
+if [[ -z "${MODEL_PROVIDER:-}" ]]; then
+  echo
+  ask_choice "model provider" MODEL_CHOICE "Vertex AI (Gemini)" "Anthropic (Claude)"
+  if (( MODEL_CHOICE == 0 )); then
+    MODEL_PROVIDER="vertex-ai"
+  else
+    MODEL_PROVIDER="anthropic"
+  fi
+fi
 
-if (( MODEL_CHOICE == 0 )); then
-  MODEL_PROVIDER="vertex-ai"
+if [[ "$MODEL_PROVIDER" == "vertex-ai" ]]; then
   gcloud services enable aiplatform.googleapis.com --project="$GCP_PROJECT" 2>/dev/null
   ok "Vertex AI API"
-else
-  MODEL_PROVIDER="anthropic"
 fi
 
 # ─────────────────────────────────────────────────
-# Generate .env, pause for secrets
+# Environment file
 # ─────────────────────────────────────────────────
 
-mkdir -p ~/.brian
-ENV_FILE=~/.brian/${BRIAN_NAME}.env
+DOCS_BASE="https://github.com/grovina/brian/blob/main/docs"
 
-if [[ -f "$ENV_FILE" ]]; then
-  skip "Using existing $(bold "$ENV_FILE")"
-else
-  DOCS_BASE="https://github.com/grovina/brian/blob/main/docs"
-
+if [[ ! -f "$ENV_FILE" ]]; then
   {
     echo "BRIAN_NAME=${BRIAN_NAME}"
     echo "GITHUB_ORG=${GITHUB_ORG}"
@@ -170,31 +181,35 @@ else
       echo "# Vertex AI — ${DOCS_BASE}/vertex-ai-setup.md"
     else
       echo "# Anthropic — ${DOCS_BASE}/anthropic-setup.md"
-      echo "ANTHROPIC_API_KEY=    # sk-ant-..."
+      echo "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}    # sk-ant-..."
       echo ""
     fi
-    echo "# Slack user token — ${DOCS_BASE}/slack-setup.md"
-    echo "SLACK_TOKEN=    # xoxp-..."
+    echo "# Slack — ${DOCS_BASE}/slack-setup.md"
+    echo "SLACK_TOKEN=${SLACK_TOKEN:-}    # xoxp-..."
     echo ""
-    echo "# GitHub PAT for brian — ${DOCS_BASE}/github-setup.md"
-    echo "GITHUB_TOKEN=    # ghp_..."
+    echo "# GitHub PAT — ${DOCS_BASE}/github-setup.md"
+    echo "GITHUB_TOKEN=${GITHUB_TOKEN:-}    # ghp_..."
   } > "$ENV_FILE"
 
   step "Fill in your tokens"
-  echo
-  info "Created $(bold "$ENV_FILE") — fill in the empty values."
-  info "Each field has a setup guide linked in the comments."
-
-  if [[ "$(uname)" == "Darwin" ]]; then
-    open -t "$ENV_FILE" < /dev/null
-  elif command -v xdg-open &>/dev/null; then
-    xdg-open "$ENV_FILE" < /dev/null 2>/dev/null || true
-  else
-    info "Edit: $(bold "$ENV_FILE")"
-  fi
-
-  wait_for_enter "Press Enter when ready..."
+  info "Created $(bold "$ENV_FILE")"
+else
+  step "Review your tokens"
+  info "$(bold "$ENV_FILE")"
 fi
+
+echo
+info "Each field has a setup guide linked in the comments."
+
+if [[ "$(uname)" == "Darwin" ]]; then
+  open -t "$ENV_FILE" < /dev/null
+elif command -v xdg-open &>/dev/null; then
+  xdg-open "$ENV_FILE" < /dev/null 2>/dev/null || true
+else
+  info "Edit: $(bold "$ENV_FILE")"
+fi
+
+wait_for_enter "Press Enter when ready..."
 
 source "$ENV_FILE"
 

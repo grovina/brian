@@ -588,8 +588,16 @@ run_provision() {
 cmd_deploy_gcp() {
   load_env && gcp_vars
 
-  echo "Enabling Vertex AI API..."
-  gcloud services enable aiplatform.googleapis.com --project="$GCP_PROJECT" 2>/dev/null || true
+  if [[ -n "${GCP_PROJECT:-}" ]]; then
+    echo "Enabling Vertex AI API..."
+    if ! gcloud services enable aiplatform.googleapis.com --project="$GCP_PROJECT" 2>&1; then
+      echo "Failed to enable Vertex AI API on project '$GCP_PROJECT'."
+      echo "This could mean missing permissions or wrong project ID."
+      if ! confirm "Continue anyway?"; then
+        exit 1
+      fi
+    fi
+  fi
 
   REMOTE_SSH="gcloud compute ssh $VM --zone=$ZONE --command"
   REMOTE_SCP="gcloud compute scp --zone=$ZONE"

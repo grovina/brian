@@ -149,46 +149,50 @@ fi
 # Generate .env, pause for secrets
 # ─────────────────────────────────────────────────
 
-ENV_FILE=$(mktemp)
-trap "rm -f $ENV_FILE" EXIT
+mkdir -p ~/.brian
+ENV_FILE=~/.brian/${BRIAN_NAME}.env
 
-DOCS_BASE="https://github.com/grovina/brian/blob/main/docs"
-
-{
-  echo "BRIAN_NAME=${BRIAN_NAME}"
-  echo "GITHUB_ORG=${GITHUB_ORG}"
-  echo "MODEL_PROVIDER=${MODEL_PROVIDER}"
-  echo ""
-  echo "# GCP"
-  echo "GCP_PROJECT=${GCP_PROJECT}"
-  echo "GCP_REGION=${GCP_REGION}"
-  echo ""
-  if [[ "$MODEL_PROVIDER" == "vertex-ai" ]]; then
-    echo "# Vertex AI — ${DOCS_BASE}/vertex-ai-setup.md"
-  else
-    echo "# Anthropic — ${DOCS_BASE}/anthropic-setup.md"
-    echo "ANTHROPIC_API_KEY=    # sk-ant-..."
-    echo ""
-  fi
-  echo "# Slack user token — ${DOCS_BASE}/slack-setup.md"
-  echo "SLACK_TOKEN=    # xoxp-..."
-  echo ""
-  echo "# GitHub PAT for brian — ${DOCS_BASE}/github-setup.md"
-  echo "GITHUB_TOKEN=    # ghp_..."
-} > "$ENV_FILE"
-
-step "Fill in your tokens"
-echo
-info "Opening .env for editing — fill in the empty values."
-info "Each field has a setup guide linked in the comments."
-
-if [[ "$(uname)" == "Darwin" ]]; then
-  open -t "$ENV_FILE" -W
-elif command -v xdg-open &>/dev/null; then
-  xdg-open "$ENV_FILE" 2>/dev/null || true
-  wait_for_enter "Press Enter when ready..."
+if [[ -f "$ENV_FILE" ]]; then
+  skip "Using existing $(bold "$ENV_FILE")"
 else
-  info "Edit: $(bold "$ENV_FILE")"
+  DOCS_BASE="https://github.com/grovina/brian/blob/main/docs"
+
+  {
+    echo "BRIAN_NAME=${BRIAN_NAME}"
+    echo "GITHUB_ORG=${GITHUB_ORG}"
+    echo "MODEL_PROVIDER=${MODEL_PROVIDER}"
+    echo ""
+    echo "# GCP"
+    echo "GCP_PROJECT=${GCP_PROJECT}"
+    echo "GCP_REGION=${GCP_REGION}"
+    echo ""
+    if [[ "$MODEL_PROVIDER" == "vertex-ai" ]]; then
+      echo "# Vertex AI — ${DOCS_BASE}/vertex-ai-setup.md"
+    else
+      echo "# Anthropic — ${DOCS_BASE}/anthropic-setup.md"
+      echo "ANTHROPIC_API_KEY=    # sk-ant-..."
+      echo ""
+    fi
+    echo "# Slack user token — ${DOCS_BASE}/slack-setup.md"
+    echo "SLACK_TOKEN=    # xoxp-..."
+    echo ""
+    echo "# GitHub PAT for brian — ${DOCS_BASE}/github-setup.md"
+    echo "GITHUB_TOKEN=    # ghp_..."
+  } > "$ENV_FILE"
+
+  step "Fill in your tokens"
+  echo
+  info "Created $(bold "$ENV_FILE") — fill in the empty values."
+  info "Each field has a setup guide linked in the comments."
+
+  if [[ "$(uname)" == "Darwin" ]]; then
+    open -t "$ENV_FILE" < /dev/null
+  elif command -v xdg-open &>/dev/null; then
+    xdg-open "$ENV_FILE" < /dev/null 2>/dev/null || true
+  else
+    info "Edit: $(bold "$ENV_FILE")"
+  fi
+
   wait_for_enter "Press Enter when ready..."
 fi
 

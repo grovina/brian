@@ -1,0 +1,304 @@
+#!/bin/bash
+set -euo pipefail
+
+DIR="$(cd "$(dirname "$0")" && pwd)"
+
+load_env() {
+  local env_file="/etc/brian/env"
+  if [[ ! -f "$env_file" ]]; then
+    echo "Missing /etc/brian/env"
+    exit 1
+  fi
+  source "$env_file"
+}
+
+cmd_setup() {
+  load_env
+
+  echo "Installing system packages..."
+  sudo apt-get update -qq
+  sudo apt-get install -y -qq curl git build-essential ca-certificates gnupg
+  if ! command -v node &>/dev/null; then
+    curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash -
+    sudo apt-get install -y -qq nodejs
+  fi
+
+  echo "Setting up brian user..."
+  id brian &>/dev/null || sudo useradd -m -s /bin/bash brian
+  echo 'brian ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart brian, /usr/bin/systemctl stop brian, /usr/bin/systemctl start brian, /usr/bin/systemctl daemon-reload' | sudo tee /etc/sudoers.d/brian > /dev/null
+  sudo chmod 440 /etc/sudoers.d/brian
+
+  echo "Configuring git..."
+  sudo -u brian git config --global user.name "${BRIAN_NAME}"
+  sudo -u brian git config --global user.email "${BRIAN_NAME}@${GITHUB_ORG:-local}.com"
+  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    sudo -u brian git config --global credential.helper store
+    echo "https://x-access-token:${GITHUB_TOKEN}@github.com" | sudo -u brian tee /home/brian/.git-credentials > /dev/null
+    sudo chmod 600 /home/brian/.git-credentials
+  fi
+
+  local APP_DIR="/home/brian/app"
+  local BRIAN_REPO="${GITHUB_ORG:-grovina}/brian"
+  local BRIAN_DEP="github:${BRIAN_REPO}"
+
+  if [[ -d "$APP_DIR/.git" ]]; then
+    echo "Updating existing project..."
+    sudo -u brian git -C "$APP_DIR" pull origin main
+  else
+    echo "Scaffolding project..."
+    scaffold_project "$APP_DIR" "$BRIAN_DEP"
+
+    if [[ -n "${GITHUB_TOKEN:-}" && -n "${GITHUB_ORG:-}" ]]; then
+      echo "Creating GitHub repo..."
+      local repo_exists
+      repo_exists=$(curl -s -o /dev/null -w "%{http_code}" \
+        -H "Authorization: token ${GITHUB_TOKEN}" \
+        "https://api.github.com/repos/${GITHUB_ORG}/${BRIAN_NAME}")
+
+      if [[ "$repo_exists" != "200" ]]; then
+        curl -s -X POST \
+          -H "Authorization: token ${GITHUB_TOKEN}" \
+          -H "Content-Type: application/json" \
+          "https://api.github.com/orgs/${GITHUB_ORG}/repos" \
+          -d "{\"name\":\"${BRIAN_NAME}\",\"private\":true}" > /dev/null
+      fi
+
+      sudo -u brian bash -c "
+        cd $APP_DIR &&
+        git init -q &&
+        git add -A &&
+        git commit -q -m 'initial ${BRIAN_NAME}' &&
+        git remote add origin https://github.com/${GITHUB_ORG}/${BRIAN_NAME}.git &&
+        git push -u origin main 2>/dev/null || git push -u origin main --force-with-lease
+      "
+    fi
+  fi
+
+  echo "Building..."
+  sudo -u brian bash -c "cd $APP_DIR && npm install && npm run build"
+
+  echo "Installing systemd service..."
+  sudo tee /etc/systemd/system/brian.service > /dev/null << EOF
+[Unit]
+Description=${BRIAN_NAME}
+After=network.target
+
+[Service]
+Type=simple
+User=brian
+WorkingDirectory=/home/brian/app
+EnvironmentFile=/etc/brian/env
+ExecStart=/usr/bin/node dist/main.js
+Restart=on-failure
+RestartSec=5
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  sudo systemctl daemon-reload
+  sudo systemctl enable brian
+  sudo systemctl restart brian
+
+  echo "Waiting for startup..."
+  sleep 10
+
+  if systemctl is-active --quiet brian; then
+    echo "${BRIAN_NAME} is running!"
+  else
+    echo "Failed to start. Check: journalctl -u brian -n 50"
+    exit 1
+  fi
+}
+
+scaffold_project() {
+  local app_dir="$1" brian_dep="$2"
+
+  sudo -u brian mkdir -p "$app_dir/src" "$app_dir/mcp"
+
+  local model_sdk_dep
+  if [[ "${MODEL_PROVIDER:-vertex-ai}" == "vertex-ai" ]]; then
+    model_sdk_dep='"@google/genai": "^1.42.0"'
+  else
+    model_sdk_dep='"@anthropic-ai/sdk": "^0.78.0"'
+  fi
+
+  sudo -u brian tee "$app_dir/package.json" > /dev/null << PKGJSON
+{
+  "name": "${BRIAN_NAME}",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node --env-file=.env dist/main.js",
+    "dev": "tsx --env-file=.env src/main.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": { "node": ">=22" },
+  "dependencies": {
+    "brian": "${brian_dep}",
+    ${model_sdk_dep}
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}
+PKGJSON
+
+  sudo -u brian tee "$app_dir/tsconfig.json" > /dev/null << 'TSCONFIG'
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "outDir": "dist",
+    "rootDir": "src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
+TSCONFIG
+
+  if [[ "${MODEL_PROVIDER:-vertex-ai}" == "vertex-ai" ]]; then
+    sudo -u brian tee "$app_dir/src/main.ts" > /dev/null << MAIN
+import { Brian, AutonomousWake, bash, selfDeploy } from 'brian';
+import { VertexAIModel } from 'brian/models/vertex-ai';
+
+const brian = new Brian({
+  name: process.env.BRIAN_NAME || '${BRIAN_NAME}',
+
+  model: new VertexAIModel({
+    project: process.env.GCP_PROJECT!,
+    region: process.env.GCP_REGION || 'europe-west1',
+  }),
+
+  wake: new AutonomousWake(),
+
+  tools: [bash, selfDeploy()],
+
+  mcp: './mcp/',
+  instructions: './instructions.md',
+});
+
+await brian.start();
+MAIN
+  else
+    sudo -u brian tee "$app_dir/src/main.ts" > /dev/null << 'MAIN'
+import { Brian, AutonomousWake, bash, selfDeploy } from 'brian';
+import { AnthropicModel } from 'brian/models/anthropic';
+
+const brian = new Brian({
+  name: process.env.BRIAN_NAME!,
+
+  model: new AnthropicModel({
+    apiKey: process.env.ANTHROPIC_API_KEY,
+  }),
+
+  wake: new AutonomousWake(),
+
+  tools: [bash, selfDeploy()],
+
+  mcp: './mcp/',
+  instructions: './instructions.md',
+});
+
+await brian.start();
+MAIN
+  fi
+
+  if [[ -n "${GITHUB_ORG:-}" ]]; then
+    sudo -u brian tee "$app_dir/instructions.md" > /dev/null << INSTRUCTIONS
+## First Run
+
+This is your first deployment. Introduce yourself on Slack, explain what you
+can do, and ask the team what they need. Once you've done that, remove this
+section and commit the change.
+
+## About
+
+You're built on the brian framework. Your org has a fork at
+github.com/${GITHUB_ORG}/brian (upstream: github.com/grovina/brian).
+
+When you identify improvements that would benefit all brians, make changes
+in the fork and open a PR to upstream.
+INSTRUCTIONS
+  else
+    sudo -u brian tee "$app_dir/instructions.md" > /dev/null << 'INSTRUCTIONS'
+## First Run
+
+This is your first deployment. Introduce yourself on Slack, explain what you
+can do, and ask the team what they need. Once you've done that, remove this
+section and commit the change.
+INSTRUCTIONS
+  fi
+
+  sudo -u brian tee "$app_dir/mcp/slack.json" > /dev/null << 'MCP'
+{
+  "name": "slack",
+  "command": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-slack"],
+  "env": { "SLACK_BOT_TOKEN": "${SLACK_TOKEN}" }
+}
+MCP
+
+  sudo -u brian tee "$app_dir/mcp/github.json" > /dev/null << 'MCP'
+{
+  "name": "github",
+  "command": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-github"],
+  "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}" }
+}
+MCP
+
+  sudo -u brian tee "$app_dir/.gitignore" > /dev/null << 'GI'
+node_modules/
+dist/
+.env
+GI
+
+  sudo -u brian tee "$app_dir/setup/deploy-self.sh" > /dev/null << 'DEPLOY'
+#!/bin/bash
+set -e
+cd "$(dirname "$0")/.."
+PREVIOUS=$(git rev-parse HEAD)
+git pull origin main
+npm install
+npm run build
+sudo systemctl restart brian
+sleep 20
+if ! systemctl is-active --quiet brian; then
+  echo "New version failed, rolling back to $PREVIOUS"
+  git checkout "$PREVIOUS"
+  npm install
+  npm run build
+  sudo systemctl restart brian
+fi
+DEPLOY
+  sudo -u brian mkdir -p "$app_dir/setup"
+  sudo -u brian chmod +x "$app_dir/setup/deploy-self.sh"
+}
+
+cmd_help() {
+  cat <<'EOF'
+./please — manage your brian
+
+Commands:
+  setup       Provision this machine and start brian
+  help        This message
+EOF
+}
+
+case "${1:-help}" in
+  setup)  cmd_setup ;;
+  help|*) cmd_help ;;
+esac

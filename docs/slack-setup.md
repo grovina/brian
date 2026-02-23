@@ -39,7 +39,12 @@ Under **OAuth & Permissions** → **User Token Scopes** (not Bot Token Scopes), 
 - Click **Install to Workspace**
 - Log in as brian's Slack account (the one tied to `bottini@yourorg.com`)
 - Authorize the app
-- Copy the **User OAuth Token** (`xoxp-...`)
-- This is your `SLACK_TOKEN`
+- Copy the **User OAuth Token** (`xoxp-...`) — this is your `SLACK_TOKEN`
+
+## 6. Find your workspace ID
+
+- In Slack, go to your workspace URL — it looks like `https://app.slack.com/client/T01234567/...`
+- The `T01234567` part is your `SLACK_TEAM_ID`
+- Alternatively: **Settings & Administration** → **Workspace settings** → the team ID is in the URL
 
 Messages brian sends will appear as coming from brian's account — just like any other team member.

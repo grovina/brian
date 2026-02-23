@@ -186,6 +186,7 @@ if [[ ! -f "$ENV_FILE" ]]; then
     fi
     echo "# Slack — ${DOCS_BASE}/slack-setup.md"
     echo "SLACK_TOKEN=${SLACK_TOKEN:-}    # xoxp-..."
+    echo "SLACK_TEAM_ID=${SLACK_TEAM_ID:-}    # T..."
     echo ""
     echo "# GitHub PAT — ${DOCS_BASE}/github-setup.md"
     echo "GITHUB_TOKEN=${GITHUB_TOKEN:-}    # ghp_..."
@@ -194,7 +195,21 @@ if [[ ! -f "$ENV_FILE" ]]; then
   step "Fill in your tokens"
   info "Created $(bold "$ENV_FILE")"
 else
-  step "Review your tokens"
+  source "$ENV_FILE"
+
+  ADDED=false
+  for key in SLACK_TEAM_ID GITHUB_TOKEN; do
+    if ! grep -q "^${key}=" "$ENV_FILE"; then
+      echo "${key}=${!key:-}" >> "$ENV_FILE"
+      ADDED=true
+    fi
+  done
+
+  if $ADDED; then
+    step "New fields added to your tokens"
+  else
+    step "Review your tokens"
+  fi
   info "$(bold "$ENV_FILE")"
 fi
 

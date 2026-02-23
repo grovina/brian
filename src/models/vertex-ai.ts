@@ -28,7 +28,7 @@ export class VertexAIModel implements ModelProvider {
       project: config.project,
       location: config.region ?? "europe-west1",
     });
-    this.model = config.model ?? "gemini-2.5-flash";
+    this.model = config.model ?? "gemini-3-flash-preview";
   }
 
   async generate(params: {

@@ -295,6 +295,12 @@ ok "SSH connected"
 info "Copying environment to VM..."
 gcloud compute scp $GCP_FLAGS "$ENV_FILE" "${VM}:/tmp/brian.env" < /dev/null
 
+info "Installing prerequisites on VM..."
+gcloud compute ssh "$VM" $GCP_FLAGS --command "
+  sudo apt-get update -qq &&
+  sudo apt-get install -y -qq git curl > /dev/null
+" < /dev/null
+
 info "Running setup on VM..."
 gcloud compute ssh "$VM" $GCP_FLAGS --command "
   sudo mkdir -p /etc/brian &&

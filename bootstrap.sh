@@ -312,7 +312,7 @@ gcloud compute ssh "$VM" $GCP_FLAGS --command "
   sudo chmod 600 /etc/brian/env &&
   git clone https://github.com/${BRIAN_REPO}.git /tmp/brian 2>/dev/null ||
     git -C /tmp/brian pull &&
-  /tmp/brian/please setup
+  DEBIAN_FRONTEND=noninteractive /tmp/brian/please setup 2>/dev/null
 " < /dev/null
 
 if gcloud compute ssh "$VM" $GCP_FLAGS --command "systemctl is-active brian" < /dev/null &>/dev/null; then

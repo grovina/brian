@@ -116,7 +116,7 @@ EOF
 scaffold_project() {
   local app_dir="$1" brian_dep="$2"
 
-  sudo -u brian mkdir -p "$app_dir/src" "$app_dir/mcp"
+  sudo -u brian mkdir -p "$app_dir/src" "$app_dir/mcp" "$app_dir/setup"
 
   local model_sdk_dep
   if [[ "${MODEL_PROVIDER:-vertex-ai}" == "vertex-ai" ]]; then
@@ -284,7 +284,6 @@ if ! systemctl is-active --quiet brian; then
   sudo systemctl restart brian
 fi
 DEPLOY
-  sudo -u brian mkdir -p "$app_dir/setup"
   sudo -u brian chmod +x "$app_dir/setup/deploy-self.sh"
 }
 

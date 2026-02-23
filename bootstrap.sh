@@ -247,7 +247,7 @@ if [[ -n "$GITHUB_ORG" ]] && $HAS_GH; then
     ok "Forked → ${BRIAN_REPO}"
   fi
 
-  gh repo sync "$BRIAN_REPO" 2>/dev/null || true
+  gh repo sync "$BRIAN_REPO" > /dev/null 2>&1 || true
   ok "Synced with upstream"
 fi
 
@@ -306,14 +306,18 @@ gcloud compute ssh "$VM" $GCP_FLAGS --command "
 " < /dev/null
 
 info "Running setup on VM..."
-gcloud compute ssh "$VM" $GCP_FLAGS --command "
+if ! gcloud compute ssh "$VM" $GCP_FLAGS --command "
   sudo mkdir -p /etc/brian &&
   sudo mv /tmp/brian.env /etc/brian/env &&
   sudo chmod 600 /etc/brian/env &&
-  git clone https://github.com/${BRIAN_REPO}.git /tmp/brian 2>/dev/null ||
-    git -C /tmp/brian pull &&
-  DEBIAN_FRONTEND=noninteractive /tmp/brian/please setup 2>/dev/null
-" < /dev/null
+  git clone https://github.com/${BRIAN_REPO}.git /tmp/brian > /dev/null 2>&1 ||
+    git -C /tmp/brian pull > /dev/null 2>&1 &&
+  DEBIAN_FRONTEND=noninteractive /tmp/brian/please setup
+" < /dev/null; then
+  fail "Setup failed on VM"
+  info "SSH in to debug: gcloud compute ssh $VM $GCP_FLAGS"
+  exit 1
+fi
 
 if gcloud compute ssh "$VM" $GCP_FLAGS --command "systemctl is-active brian" < /dev/null &>/dev/null; then
   ok "${BRIAN_NAME} is running"

@@ -38,8 +38,17 @@ cmd_setup() {
   fi
 
   local APP_DIR="/home/brian/app"
+  local FRAMEWORK_DIR="/home/brian/brian"
   local BRIAN_REPO="${GITHUB_ORG:-grovina}/brian"
-  local BRIAN_DEP="github:${BRIAN_REPO}"
+
+  echo "Updating framework..."
+  if [[ -d "$FRAMEWORK_DIR/.git" ]]; then
+    sudo -u brian git -C "$FRAMEWORK_DIR" fetch origin main -q
+    sudo -u brian git -C "$FRAMEWORK_DIR" reset --hard origin/main -q
+  else
+    sudo -u brian git clone -q "https://github.com/${BRIAN_REPO}.git" "$FRAMEWORK_DIR"
+  fi
+  sudo -u brian bash -c "cd $FRAMEWORK_DIR && npm install --silent && npm run build --silent"
 
   if [[ -d "$APP_DIR/.git" ]]; then
     echo "Updating existing project..."
@@ -47,7 +56,7 @@ cmd_setup() {
     sudo -u brian git -C "$APP_DIR" reset --hard origin/main -q
   else
     echo "Scaffolding project..."
-    scaffold_project "$APP_DIR" "$BRIAN_DEP"
+    scaffold_project "$APP_DIR" "file:$FRAMEWORK_DIR"
 
     if [[ -n "${GITHUB_TOKEN:-}" && -n "${GITHUB_ORG:-}" ]]; then
       echo "Creating GitHub repo..."

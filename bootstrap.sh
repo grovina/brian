@@ -325,9 +325,9 @@ if ! gcloud compute ssh "$VM" $GCP_FLAGS --command "
   sudo mkdir -p /etc/brian &&
   sudo mv /tmp/brian.env /etc/brian/env &&
   sudo chmod 600 /etc/brian/env &&
-  git clone https://github.com/${BRIAN_REPO}.git /tmp/brian > /dev/null 2>&1 ||
-    git -C /tmp/brian pull > /dev/null 2>&1 &&
-  DEBIAN_FRONTEND=noninteractive /tmp/brian/please setup
+  git clone https://github.com/${BRIAN_REPO}.git /tmp/brian-setup > /dev/null 2>&1 ||
+    git -C /tmp/brian-setup pull > /dev/null 2>&1 &&
+  DEBIAN_FRONTEND=noninteractive /tmp/brian-setup/please setup
 " < /dev/null 2>&1 | sed 's/^/    /'; then
   fail "Setup failed on VM"
   info "SSH in to debug: gcloud compute ssh $VM $GCP_FLAGS"

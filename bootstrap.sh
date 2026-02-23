@@ -122,7 +122,7 @@ fi
 
 if [[ "$BRIAN_NAME" == "brian" ]]; then
   fail "Name can't be 'brian' — it conflicts with the framework fork repo"
-  info "Pick a name that's unique to your org (e.g. pickle, jarvis, friday)"
+  info "Pick a name that's unique to your org (e.g. brianna, jarvis, friday)"
   exit 1
 fi
 

@@ -11,7 +11,7 @@ curl -fsSL https://raw.githubusercontent.com/grovina/brian/main/bootstrap.sh | b
 The bootstrap script forks this repo to your org, scaffolds your brian's project, and installs everything. You end up with two repos:
 
 - **`your-org/brian`** — your fork of the framework (editable, stays in sync with upstream)
-- **`your-org/pickle`** — your brian's implementation (name, instructions, MCP configs, deploy scripts)
+- **`your-org/brianna`** — your brian's implementation (name, instructions, MCP configs, deploy scripts)
 
 ## Usage
 
@@ -21,7 +21,7 @@ import { AnthropicModel } from 'brian/models/anthropic';
 // or: import { VertexAIModel } from 'brian/models/vertex-ai';
 
 const brian = new Brian({
-  name: 'pickle',
+  name: 'brianna',
 
   model: new AnthropicModel({
     apiKey: process.env.ANTHROPIC_API_KEY,

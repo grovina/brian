@@ -179,17 +179,29 @@ if [[ -n "$GITHUB_ORG" ]] && $HAS_GH; then
   fi
 fi
 
+ask_required "GCP project" "${GCP_PROJECT:-}" GCP_PROJECT
+ask "GCP region" "${GCP_REGION:-europe-west1}" GCP_REGION
+
+if ! gcloud projects describe "$GCP_PROJECT" &>/dev/null; then
+  fail "Cannot access GCP project '$GCP_PROJECT'"
+  info "Check the project ID and your permissions, then re-run."
+  exit 1
+fi
+ok "GCP project $GCP_PROJECT"
+
+info "Enabling required APIs..."
+gcloud services enable compute.googleapis.com --project="$GCP_PROJECT" 2>/dev/null
+ok "Compute Engine API"
+
 echo
 ask_choice "model provider" MODEL_CHOICE "Vertex AI (Gemini)" "Anthropic (Claude)"
 
 if (( MODEL_CHOICE == 0 )); then
   MODEL_PROVIDER="vertex-ai"
-  ask_required "GCP project (for Vertex AI)" "${GCP_PROJECT:-}" GCP_PROJECT
-  ask "Vertex AI region" "${GCP_REGION:-europe-west1}" GCP_REGION
+  gcloud services enable aiplatform.googleapis.com --project="$GCP_PROJECT" 2>/dev/null
+  ok "Vertex AI API"
 else
   MODEL_PROVIDER="anthropic"
-  GCP_PROJECT=""
-  GCP_REGION=""
 fi
 
 # ─────────────────────────────────────────────────
@@ -207,15 +219,17 @@ else
     echo "BRIAN_NAME=${BRIAN_NAME}"
     echo "GITHUB_ORG=${GITHUB_ORG}"
     echo ""
+    echo "# GCP"
+    echo "GCP_PROJECT=${GCP_PROJECT}"
+    echo "GCP_REGION=${GCP_REGION}"
+    echo ""
     if [[ "$MODEL_PROVIDER" == "vertex-ai" ]]; then
       echo "# Vertex AI — ${DOCS_BASE}/vertex-ai-setup.md"
-      echo "GCP_PROJECT=${GCP_PROJECT}"
-      echo "GCP_REGION=${GCP_REGION}"
     else
       echo "# Anthropic — ${DOCS_BASE}/anthropic-setup.md"
       echo "ANTHROPIC_API_KEY=    # sk-ant-..."
+      echo ""
     fi
-    echo ""
     echo "# Slack user token — ${DOCS_BASE}/slack-setup.md"
     echo "SLACK_TOKEN=    # xoxp-..."
     echo ""
@@ -548,24 +562,24 @@ confirm() {
 
 load_env() {
   if [[ ! -f "$ENV_FILE" ]]; then
-    echo "Missing .env file. Copy .env.example and fill in your values."
+    echo "Missing .env file."
     exit 1
   fi
   source "$ENV_FILE"
-  for var in SLACK_TOKEN; do
+  for var in BRIAN_NAME GCP_PROJECT GCP_REGION SLACK_TOKEN; do
     if [[ -z "${!var:-}" ]]; then
       echo "Missing $var in .env"
       exit 1
     fi
   done
-  BRIAN_NAME="${BRIAN_NAME:-brian}"
 }
 
 gcp_vars() {
   VM="${BRIAN_NAME}"
-  ZONE="${GCE_ZONE:-europe-west1-b}"
+  ZONE="${GCP_REGION}-b"
   MACHINE_TYPE="${GCE_MACHINE_TYPE:-e2-small}"
   BOOT_DISK_SIZE="${GCE_BOOT_DISK_SIZE:-20GB}"
+  GCP_FLAGS="--project=$GCP_PROJECT --zone=$ZONE"
 }
 
 run_provision() {
@@ -647,25 +661,18 @@ run_provision() {
 cmd_deploy_gcp() {
   load_env && gcp_vars
 
-  if [[ -n "${GCP_PROJECT:-}" ]]; then
-    echo "Enabling Vertex AI API..."
-    if ! gcloud services enable aiplatform.googleapis.com --project="$GCP_PROJECT" 2>&1; then
-      echo "Failed to enable Vertex AI API on project '$GCP_PROJECT'."
-      echo "This could mean missing permissions or wrong project ID."
-      if ! confirm "Continue anyway?"; then
-        exit 1
-      fi
-    fi
-  fi
+  echo "Enabling required APIs..."
+  gcloud services enable compute.googleapis.com --project="$GCP_PROJECT" 2>/dev/null
+  gcloud services enable aiplatform.googleapis.com --project="$GCP_PROJECT" 2>/dev/null || true
 
-  REMOTE_SSH="gcloud compute ssh $VM --zone=$ZONE --command"
-  REMOTE_SCP="gcloud compute scp --zone=$ZONE"
+  REMOTE_SSH="gcloud compute ssh $VM $GCP_FLAGS --command"
+  REMOTE_SCP="gcloud compute scp $GCP_FLAGS"
   REMOTE_TARGET="$VM"
 
-  if ! gcloud compute instances describe "$VM" --zone="$ZONE" &>/dev/null; then
+  if ! gcloud compute instances describe "$VM" $GCP_FLAGS &>/dev/null; then
     echo "Creating VM '$VM' ($MACHINE_TYPE, $BOOT_DISK_SIZE)..."
     gcloud compute instances create "$VM" \
-      --zone="$ZONE" \
+      $GCP_FLAGS \
       --machine-type="$MACHINE_TYPE" \
       --boot-disk-size="$BOOT_DISK_SIZE" \
       --image-family="debian-12" \
@@ -712,23 +719,23 @@ cmd_deploy_local() {
 cmd_destroy() {
   load_env && gcp_vars
   echo "Destroying VM ($VM in $ZONE)..."
-  gcloud compute instances delete "$VM" --zone="$ZONE" --quiet
+  gcloud compute instances delete "$VM" $GCP_FLAGS --quiet
   echo "Done."
 }
 
-cmd_logs() { load_env && gcp_vars && gcloud compute ssh "$VM" --zone="$ZONE" --command "journalctl -u brian -f"; }
-cmd_ssh() { load_env && gcp_vars && gcloud compute ssh "$VM" --zone="$ZONE"; }
+cmd_logs() { load_env && gcp_vars && gcloud compute ssh "$VM" $GCP_FLAGS --command "journalctl -u brian -f"; }
+cmd_ssh() { load_env && gcp_vars && gcloud compute ssh "$VM" $GCP_FLAGS; }
 
 cmd_status() {
   load_env && gcp_vars
   echo -n "${BRIAN_NAME} on ${VM} (${ZONE}): "
-  gcloud compute ssh "$VM" --zone="$ZONE" --command "systemctl is-active brian" 2>/dev/null || echo "not running"
+  gcloud compute ssh "$VM" $GCP_FLAGS --command "systemctl is-active brian" 2>/dev/null || echo "not running"
 }
 
 cmd_restart() {
   load_env && gcp_vars
   echo "Restarting ${BRIAN_NAME}..."
-  gcloud compute ssh "$VM" --zone="$ZONE" --command "sudo -u brian /home/brian/deploy-self.sh"
+  gcloud compute ssh "$VM" $GCP_FLAGS --command "sudo -u brian /home/brian/deploy-self.sh"
 }
 
 cmd_help() {
@@ -810,25 +817,15 @@ ok "npm install"
 step "Deploying to GCP"
 
 VM="${BRIAN_NAME}"
-ZONE="${GCE_ZONE:-europe-west1-b}"
+ZONE="${GCP_REGION}-b"
 MACHINE_TYPE="${GCE_MACHINE_TYPE:-e2-small}"
 BOOT_DISK_SIZE="${GCE_BOOT_DISK_SIZE:-20GB}"
+GCP_FLAGS="--project=$GCP_PROJECT --zone=$ZONE"
 
-if [[ -n "${GCP_PROJECT:-}" ]]; then
-  info "Enabling Vertex AI API..."
-  if ! gcloud services enable aiplatform.googleapis.com --project="$GCP_PROJECT" 2>&1; then
-    fail "Failed to enable Vertex AI API on project '$GCP_PROJECT'"
-    info "This could mean missing permissions or wrong project ID."
-    if ! confirm "Continue anyway?"; then
-      exit 1
-    fi
-  fi
-fi
-
-if ! gcloud compute instances describe "$VM" --zone="$ZONE" &>/dev/null; then
+if ! gcloud compute instances describe "$VM" $GCP_FLAGS &>/dev/null; then
   info "Creating VM $(bold "$VM") ($MACHINE_TYPE, $BOOT_DISK_SIZE)..."
   gcloud compute instances create "$VM" \
-    --zone="$ZONE" \
+    $GCP_FLAGS \
     --machine-type="$MACHINE_TYPE" \
     --boot-disk-size="$BOOT_DISK_SIZE" \
     --image-family="debian-12" \
@@ -838,7 +835,7 @@ if ! gcloud compute instances describe "$VM" --zone="$ZONE" &>/dev/null; then
 
   info "Waiting for SSH..."
   for i in {1..30}; do
-    if gcloud compute ssh "$VM" --zone="$ZONE" --command "true" &>/dev/null; then break; fi
+    if gcloud compute ssh "$VM" $GCP_FLAGS --command "true" &>/dev/null; then break; fi
     sleep 5
   done
   ok "VM created"
@@ -846,8 +843,8 @@ else
   ok "VM $VM already exists"
 fi
 
-REMOTE_SSH="gcloud compute ssh $VM --zone=$ZONE --command"
-REMOTE_SCP="gcloud compute scp --zone=$ZONE"
+REMOTE_SSH="gcloud compute ssh $VM $GCP_FLAGS --command"
+REMOTE_SCP="gcloud compute scp $GCP_FLAGS"
 
 info "Installing system packages..."
 $REMOTE_SSH "
@@ -927,7 +924,7 @@ if $REMOTE_SSH "systemctl is-active brian" &>/dev/null; then
   ok "${BRIAN_NAME} is running"
 else
   fail "${BRIAN_NAME} failed to start"
-  info "Check logs: gcloud compute ssh $VM --zone=$ZONE --command 'journalctl -u brian -n 50'"
+  info "Check logs: gcloud compute ssh $VM $GCP_FLAGS --command 'journalctl -u brian -n 50'"
   exit 1
 fi
 

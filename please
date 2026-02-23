@@ -85,7 +85,7 @@ cmd_setup() {
   fi
 
   echo "Building..."
-  sudo -u brian bash -c "cd $APP_DIR && npm install --silent && npm run build --silent"
+  sudo -u brian bash -c "cd $APP_DIR && npm install --silent file:$FRAMEWORK_DIR && npm run build --silent"
 
   echo "Installing systemd service..."
   sudo tee /etc/systemd/system/brian.service > /dev/null << EOF

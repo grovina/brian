@@ -26,6 +26,16 @@ ask() {
   eval "$var_name=\"${value:-$default}\""
 }
 
+ask_required() {
+  local prompt="$1" default="${2:-}" var_name="$3"
+  while true; do
+    ask "$prompt" "$default" "$var_name"
+    eval "local val=\$$var_name"
+    [[ -n "$val" ]] && return
+    fail "Required"
+  done
+}
+
 ask_choice() {
   local prompt="$1" var_name="$2"
   shift 2
@@ -122,19 +132,23 @@ fi
 
 step "Configuration"
 
-ask "GitHub org (repos will be created here)" "" GITHUB_ORG
-ask "bot name (also the repo and VM name)" "" BRIAN_NAME
-
-if [[ -z "$BRIAN_NAME" ]]; then
-  fail "A name is required"
-  exit 1
+if [[ -f .env ]]; then
+  source .env 2>/dev/null || true
+  skip "Loaded defaults from .env"
 fi
 
-if [[ "$BRIAN_NAME" == "brian" ]]; then
-  fail "Name can't be 'brian' — it conflicts with the framework fork repo"
-  info "Pick a name that's unique to your org (e.g. brianna, jarvis, friday)"
-  exit 1
-fi
+ask "GitHub org (repos will be created here)" "${GITHUB_ORG:-}" GITHUB_ORG
+
+while true; do
+  ask_required "bot name (also the repo and VM name)" "${BRIAN_NAME:-}" BRIAN_NAME
+  if [[ "$BRIAN_NAME" == "brian" ]]; then
+    fail "Name can't be 'brian' — it conflicts with the framework fork repo"
+    info "Pick a name that's unique to your org (e.g. brianna, jarvis, friday)"
+    BRIAN_NAME=""
+  else
+    break
+  fi
+done
 
 BRIAN_FORK_EXISTS=false
 BOT_REPO_EXISTS=false
@@ -170,12 +184,8 @@ ask_choice "model provider" MODEL_CHOICE "Vertex AI (Gemini)" "Anthropic (Claude
 
 if (( MODEL_CHOICE == 0 )); then
   MODEL_PROVIDER="vertex-ai"
-  ask "GCP project (for Vertex AI)" "" GCP_PROJECT
-  ask "Vertex AI region" "europe-west1" GCP_REGION
-  if [[ -z "$GCP_PROJECT" ]]; then
-    fail "GCP project is required for Vertex AI"
-    exit 1
-  fi
+  ask_required "GCP project (for Vertex AI)" "${GCP_PROJECT:-}" GCP_PROJECT
+  ask "Vertex AI region" "${GCP_REGION:-europe-west1}" GCP_REGION
 else
   MODEL_PROVIDER="anthropic"
   GCP_PROJECT=""

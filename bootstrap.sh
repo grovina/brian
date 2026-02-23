@@ -246,6 +246,9 @@ if [[ -n "$GITHUB_ORG" ]] && $HAS_GH; then
     gh repo fork grovina/brian --org "$GITHUB_ORG" --clone=false 2>/dev/null
     ok "Forked → ${BRIAN_REPO}"
   fi
+
+  gh repo sync "$BRIAN_REPO" 2>/dev/null || true
+  ok "Synced with upstream"
 fi
 
 # ─────────────────────────────────────────────────

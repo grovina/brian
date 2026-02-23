@@ -296,7 +296,7 @@ fi
 ok "SSH connected"
 
 info "Copying environment to VM..."
-gcloud compute scp $GCP_FLAGS "$ENV_FILE" "${VM}:/tmp/brian.env" < /dev/null
+gcloud compute scp $GCP_FLAGS "$ENV_FILE" "${VM}:/tmp/brian.env" < /dev/null > /dev/null 2>&1
 
 info "Installing prerequisites on VM..."
 gcloud compute ssh "$VM" $GCP_FLAGS --command "
@@ -313,7 +313,7 @@ if ! gcloud compute ssh "$VM" $GCP_FLAGS --command "
   git clone https://github.com/${BRIAN_REPO}.git /tmp/brian > /dev/null 2>&1 ||
     git -C /tmp/brian pull > /dev/null 2>&1 &&
   DEBIAN_FRONTEND=noninteractive /tmp/brian/please setup
-" < /dev/null; then
+" < /dev/null 2>&1 | sed 's/^/    /'; then
   fail "Setup failed on VM"
   info "SSH in to debug: gcloud compute ssh $VM $GCP_FLAGS"
   exit 1

@@ -263,7 +263,7 @@ fi
 info "Waiting for SSH access..."
 SSH_READY=false
 for i in {1..30}; do
-  if gcloud compute ssh "$VM" $GCP_FLAGS --command "true" 2>/dev/null; then
+  if gcloud compute ssh "$VM" $GCP_FLAGS --command "true" < /dev/null 2>/dev/null; then
     SSH_READY=true
     break
   fi
@@ -278,7 +278,7 @@ fi
 ok "SSH connected"
 
 info "Copying environment to VM..."
-gcloud compute scp $GCP_FLAGS "$ENV_FILE" "${VM}:/tmp/brian.env"
+gcloud compute scp $GCP_FLAGS "$ENV_FILE" "${VM}:/tmp/brian.env" < /dev/null
 
 info "Running setup on VM..."
 gcloud compute ssh "$VM" $GCP_FLAGS --command "
@@ -288,9 +288,9 @@ gcloud compute ssh "$VM" $GCP_FLAGS --command "
   git clone https://github.com/${BRIAN_REPO}.git /tmp/brian 2>/dev/null ||
     git -C /tmp/brian pull &&
   /tmp/brian/please setup
-"
+" < /dev/null
 
-if gcloud compute ssh "$VM" $GCP_FLAGS --command "systemctl is-active brian" &>/dev/null; then
+if gcloud compute ssh "$VM" $GCP_FLAGS --command "systemctl is-active brian" < /dev/null &>/dev/null; then
   ok "${BRIAN_NAME} is running"
 else
   fail "${BRIAN_NAME} failed to start"

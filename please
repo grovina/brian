@@ -43,8 +43,8 @@ cmd_setup() {
 
   if [[ -d "$APP_DIR/.git" ]]; then
     echo "Updating existing project..."
-    sudo -u brian git -C "$APP_DIR" fetch origin main
-    sudo -u brian git -C "$APP_DIR" reset --hard origin/main
+    sudo -u brian git -C "$APP_DIR" fetch origin main -q
+    sudo -u brian git -C "$APP_DIR" reset --hard origin/main -q
   else
     echo "Scaffolding project..."
     scaffold_project "$APP_DIR" "$BRIAN_DEP"
@@ -69,14 +69,14 @@ cmd_setup() {
         git init -q &&
         git add -A &&
         git commit -q -m 'initial ${BRIAN_NAME}' &&
-        git remote add origin https://github.com/${GITHUB_ORG}/${BRIAN_NAME}.git &&
-        git push -u origin main 2>/dev/null || git push -u origin main --force-with-lease
+        git remote add origin https://github.com/${GITHUB_ORG}/${BRIAN_NAME}.git 2>/dev/null || true &&
+        git push -u origin main -q 2>/dev/null || git push -u origin main --force-with-lease -q 2>/dev/null
       "
     fi
   fi
 
   echo "Building..."
-  sudo -u brian bash -c "cd $APP_DIR && npm install && npm run build"
+  sudo -u brian bash -c "cd $APP_DIR && npm install --silent && npm run build --silent"
 
   echo "Installing systemd service..."
   sudo tee /etc/systemd/system/brian.service > /dev/null << EOF

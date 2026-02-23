@@ -14,3 +14,7 @@ export type {
   ToolCallResult,
   ImageData,
 } from "./types.js";
+
+export { PeriodicWake, type PeriodicWakeConfig } from "./wake/periodic.js";
+
+export { bash, selfDeploy } from "./tools/index.js";

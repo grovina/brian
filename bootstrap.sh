@@ -1,8 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 
-# --- formatting ---
-
 bold() { printf "\033[1m%s\033[0m" "$1"; }
 dim() { printf "\033[2m%s\033[0m" "$1"; }
 green() { printf "\033[32m%s\033[0m" "$1"; }
@@ -28,20 +26,34 @@ ask() {
   eval "$var_name=\"${value:-$default}\""
 }
 
-ask_secret() {
+ask_choice() {
   local prompt="$1" var_name="$2"
-  printf "    %s: " "$(bold "$prompt")"
-  read -rs value < /dev/tty
-  value="${value#"${value%%[![:space:]]*}"}"
-  value="${value%"${value##*[![:space:]]}"}"
-  echo
-  eval "$var_name=\"$value\""
+  shift 2
+  local options=("$@")
+  printf "    %s\n" "$(bold "$prompt")"
+  for i in "${!options[@]}"; do
+    printf "      %s) %s\n" "$((i+1))" "${options[$i]}"
+  done
+  printf "    %s: " "$(bold "choice")"
+  read -r choice < /dev/tty
+  choice="${choice#"${choice%%[![:space:]]*}"}"
+  choice="${choice%"${choice##*[![:space:]]}"}"
+  local idx=$(( ${choice:-1} - 1 ))
+  if (( idx < 0 || idx >= ${#options[@]} )); then
+    idx=0
+  fi
+  eval "$var_name=\"$idx\""
 }
 
 confirm() {
   printf "\n  %s " "$(bold "$1 (Y/n)")"
   read -r answer < /dev/tty
   [[ -z "$answer" || "$answer" =~ ^[Yy] ]]
+}
+
+wait_for_enter() {
+  printf "\n  %s " "$(bold "$1")"
+  read -r _ < /dev/tty
 }
 
 # ─────────────────────────────────────────────────
@@ -95,56 +107,122 @@ else
 fi
 
 # ─────────────────────────────────────────────────
-# Phase 2: Gather inputs
+# Phase 2: Decisions
 # ─────────────────────────────────────────────────
 
 step "Configuration"
 
 ask "github org" "" GITHUB_ORG
-ask "brian name" "brian" BRIAN_NAME
+ask "bot name" "" BRIAN_NAME
 
-echo
-ask_secret "slack token (xoxp-...)" SLACK_TOKEN
-ask "gcp project" "" GCP_PROJECT
-ask "gcp region" "europe-west1" GCP_REGION
-ask_secret "github token" GITHUB_TOKEN
-
-# Validate required fields
-MISSING=()
-[[ -z "$BRIAN_NAME" ]] && MISSING+=("brian name")
-[[ -z "$SLACK_TOKEN" ]] && MISSING+=("slack token")
-[[ -z "$GCP_PROJECT" ]] && MISSING+=("gcp project")
-
-if (( ${#MISSING[@]} > 0 )); then
-  echo
-  fail "Missing required fields: ${MISSING[*]}"
+if [[ -z "$BRIAN_NAME" ]]; then
+  fail "A name is required"
   exit 1
 fi
 
+if [[ "$BRIAN_NAME" == "brian" ]]; then
+  fail "Name can't be 'brian' — it conflicts with the framework fork repo"
+  info "Pick a name that's unique to your org (e.g. pickle, jarvis, friday)"
+  exit 1
+fi
+
+echo
+ask_choice "model provider" MODEL_CHOICE "Vertex AI (Gemini)" "Anthropic (Claude)"
+
+if (( MODEL_CHOICE == 0 )); then
+  MODEL_PROVIDER="vertex-ai"
+  ask "gcp project" "" GCP_PROJECT
+  ask "gcp region" "europe-west1" GCP_REGION
+  if [[ -z "$GCP_PROJECT" ]]; then
+    fail "GCP project is required for Vertex AI"
+    exit 1
+  fi
+else
+  MODEL_PROVIDER="anthropic"
+  GCP_PROJECT=""
+  GCP_REGION=""
+fi
+
 # ─────────────────────────────────────────────────
-# Phase 3: Confirm plan
+# Phase 3: Generate .env, pause for secrets
 # ─────────────────────────────────────────────────
 
 PROJECT_DIR="${BRIAN_NAME}"
+DOCS_BASE="https://github.com/grovina/brian/blob/main/docs"
+mkdir -p "$PROJECT_DIR"
+
+{
+  echo "BRIAN_NAME=${BRIAN_NAME}"
+  echo "GITHUB_ORG=${GITHUB_ORG}"
+  echo ""
+  if [[ "$MODEL_PROVIDER" == "vertex-ai" ]]; then
+    echo "# Vertex AI — ${DOCS_BASE}/vertex-ai-setup.md"
+    echo "GCP_PROJECT=${GCP_PROJECT}"
+    echo "GCP_REGION=${GCP_REGION}"
+  else
+    echo "# Anthropic — ${DOCS_BASE}/anthropic-setup.md"
+    echo "ANTHROPIC_API_KEY=    # sk-ant-..."
+  fi
+  echo ""
+  echo "# Slack user token — ${DOCS_BASE}/slack-setup.md"
+  echo "SLACK_TOKEN=    # xoxp-..."
+  echo ""
+  echo "# GitHub PAT for brian — ${DOCS_BASE}/github-setup.md"
+  echo "GITHUB_TOKEN=    # ghp_..."
+} > "$PROJECT_DIR/.env"
+
+step "Fill in your tokens"
+echo
+info "Created $(bold "${PROJECT_DIR}/.env") — open it and fill in the empty values."
+info "Each field has a setup guide linked in the comments."
+
+wait_for_enter "Press Enter when ready..."
+
+# ─────────────────────────────────────────────────
+# Phase 4: Read .env, validate, plan
+# ─────────────────────────────────────────────────
+
+source "$PROJECT_DIR/.env"
+
+MISSING=()
+[[ -z "${SLACK_TOKEN:-}" ]] && MISSING+=("SLACK_TOKEN")
+if [[ "$MODEL_PROVIDER" == "anthropic" ]]; then
+  [[ -z "${ANTHROPIC_API_KEY:-}" ]] && MISSING+=("ANTHROPIC_API_KEY")
+fi
+
+if (( ${#MISSING[@]} > 0 )); then
+  fail "Still missing in .env: ${MISSING[*]}"
+  info "Fill them in and re-run $(bold "./bootstrap.sh")"
+  exit 1
+fi
+
 BRIAN_DEP="github:grovina/brian"
 
 step "Plan"
 
 if [[ -n "$GITHUB_ORG" ]] && $HAS_GH; then
   BRIAN_DEP="github:${GITHUB_ORG}/brian"
-  info "Fork $(bold "grovina/brian") → $(bold "${GITHUB_ORG}/brian")"
-  info "Create repo $(bold "${GITHUB_ORG}/${BRIAN_NAME}") (private)"
-fi
 
-info "Create project $(bold "${PROJECT_DIR}/") with:"
-info "  src/main.ts, instructions.md, mcp/, setup/, please"
-info "Dependency: $(bold "$BRIAN_DEP")"
-info "Install npm packages"
-
-if [[ -d "$PROJECT_DIR" ]]; then
   echo
-  yellow "    ⚠ Directory '$PROJECT_DIR' already exists — files will be overwritten"
+  info "This creates two repos in $(bold "$GITHUB_ORG"):"
+  echo
+  info "  $(bold "${GITHUB_ORG}/brian")    fork of the framework — shared, editable"
+  info "                       ${BRIAN_NAME} uses this as a dependency and can"
+  info "                       improve it directly, then PR back to upstream"
+  echo
+  info "  $(bold "${GITHUB_ORG}/${BRIAN_NAME}")   ${BRIAN_NAME}'s own project — private, org-specific"
+  info "                       name, instructions, MCP configs, deploy scripts"
+  echo
 fi
+
+info "$(dim "actions:")"
+if [[ -n "$GITHUB_ORG" ]] && $HAS_GH; then
+  info "  Fork $(bold "grovina/brian") → $(bold "${GITHUB_ORG}/brian")"
+  info "  Create repo $(bold "${GITHUB_ORG}/${BRIAN_NAME}") (private)"
+fi
+info "  Scaffold $(bold "${PROJECT_DIR}/") — src/main.ts, instructions, mcp, deploy"
+info "  Model: $(bold "$MODEL_PROVIDER")"
+info "  Install npm packages"
 
 if ! confirm "Proceed?"; then
   echo "  Cancelled."
@@ -152,7 +230,7 @@ if ! confirm "Proceed?"; then
 fi
 
 # ─────────────────────────────────────────────────
-# Phase 4: Execute
+# Phase 5: Execute
 # ─────────────────────────────────────────────────
 
 # --- Fork ---
@@ -174,6 +252,13 @@ step "Scaffolding project"
 
 mkdir -p "$PROJECT_DIR/src" "$PROJECT_DIR/mcp" "$PROJECT_DIR/setup"
 
+MODEL_SDK_DEP=""
+if [[ "$MODEL_PROVIDER" == "vertex-ai" ]]; then
+  MODEL_SDK_DEP='"@google/genai": "^1.42.0"'
+else
+  MODEL_SDK_DEP='"@anthropic-ai/sdk": "^0.78.0"'
+fi
+
 cat > "$PROJECT_DIR/package.json" << PKGJSON
 {
   "name": "${BRIAN_NAME}",
@@ -191,7 +276,8 @@ cat > "$PROJECT_DIR/package.json" << PKGJSON
     "node": ">=22"
   },
   "dependencies": {
-    "brian": "${BRIAN_DEP}"
+    "brian": "${BRIAN_DEP}",
+    ${MODEL_SDK_DEP}
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
@@ -221,11 +307,10 @@ cat > "$PROJECT_DIR/tsconfig.json" << 'TSCONFIG'
 TSCONFIG
 ok "tsconfig.json"
 
-cat > "$PROJECT_DIR/src/main.ts" << MAIN
-import { Brian } from 'brian';
+if [[ "$MODEL_PROVIDER" == "vertex-ai" ]]; then
+  cat > "$PROJECT_DIR/src/main.ts" << MAIN
+import { Brian, PeriodicWake, bash, selfDeploy } from 'brian';
 import { VertexAIModel } from 'brian/models/vertex-ai';
-import { PeriodicWake } from 'brian/wake/periodic';
-import { bash, selfDeploy } from 'brian/tools';
 
 const brian = new Brian({
   name: process.env.BRIAN_NAME || '${BRIAN_NAME}',
@@ -248,6 +333,32 @@ const brian = new Brian({
 
 await brian.start();
 MAIN
+else
+  cat > "$PROJECT_DIR/src/main.ts" << MAIN
+import { Brian, PeriodicWake, bash, selfDeploy } from 'brian';
+import { AnthropicModel } from 'brian/models/anthropic';
+
+const brian = new Brian({
+  name: process.env.BRIAN_NAME || '${BRIAN_NAME}',
+
+  model: new AnthropicModel({
+    apiKey: process.env.ANTHROPIC_API_KEY,
+  }),
+
+  wake: new PeriodicWake({
+    intervalMinutes: 3,
+    maxIntervalMinutes: 60,
+  }),
+
+  tools: [bash, selfDeploy()],
+
+  mcp: './mcp/',
+  instructions: './instructions.md',
+});
+
+await brian.start();
+MAIN
+fi
 ok "src/main.ts"
 
 if [[ -n "$GITHUB_ORG" ]]; then
@@ -284,7 +395,7 @@ INSTRUCTIONS
 fi
 ok "instructions.md"
 
-if [[ -n "$SLACK_TOKEN" ]]; then
+if [[ -n "${SLACK_TOKEN:-}" ]]; then
   cat > "$PROJECT_DIR/mcp/slack.json" << 'MCPSLACK'
 {
   "name": "slack",
@@ -298,7 +409,7 @@ MCPSLACK
   ok "mcp/slack.json"
 fi
 
-if [[ -n "$GITHUB_TOKEN" ]]; then
+if [[ -n "${GITHUB_TOKEN:-}" ]]; then
   cat > "$PROJECT_DIR/mcp/github.json" << 'MCPGITHUB'
 {
   "name": "github",
@@ -312,25 +423,8 @@ MCPGITHUB
   ok "mcp/github.json"
 fi
 
-cat > "$PROJECT_DIR/.env" << DOTENV
-BRIAN_NAME=${BRIAN_NAME}
-SLACK_TOKEN=${SLACK_TOKEN}
-GCP_PROJECT=${GCP_PROJECT}
-GCP_REGION=${GCP_REGION}
-GITHUB_TOKEN=${GITHUB_TOKEN}
-GITHUB_ORG=${GITHUB_ORG}
-DOTENV
+# .env already has the user's values from Phase 3 — no need to rewrite it
 ok ".env"
-
-cat > "$PROJECT_DIR/.env.example" << 'DOTENVEX'
-BRIAN_NAME=brian
-SLACK_TOKEN=xoxp-...
-GCP_PROJECT=your-project
-GCP_REGION=europe-west1
-GITHUB_TOKEN=ghp_...
-GITHUB_ORG=your-org
-DOTENVEX
-ok ".env.example"
 
 cat > "$PROJECT_DIR/.gitignore" << 'GITIGNORE'
 node_modules/
@@ -399,7 +493,7 @@ load_env() {
     exit 1
   fi
   source "$ENV_FILE"
-  for var in SLACK_TOKEN GCP_PROJECT; do
+  for var in SLACK_TOKEN; do
     if [[ -z "${!var:-}" ]]; then
       echo "Missing $var in .env"
       exit 1
@@ -640,7 +734,7 @@ npm install 2>&1 | tail -3
 ok "npm install"
 
 # ─────────────────────────────────────────────────
-# Phase 5: Summary
+# Phase 6: Summary
 # ─────────────────────────────────────────────────
 
 step "Done!"

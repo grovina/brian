@@ -16,13 +16,12 @@ The bootstrap script forks this repo to your org, scaffolds your brian's project
 ## Usage
 
 ```typescript
-import { Brian } from 'brian';
+import { Brian, PeriodicWake, bash, selfDeploy } from 'brian';
 import { AnthropicModel } from 'brian/models/anthropic';
-import { PeriodicWake } from 'brian/wake/periodic';
-import { bash, selfDeploy } from 'brian/tools';
+// or: import { VertexAIModel } from 'brian/models/vertex-ai';
 
 const brian = new Brian({
-  name: process.env.BRIAN_NAME || 'brian',
+  name: 'pickle',
 
   model: new AnthropicModel({
     apiKey: process.env.ANTHROPIC_API_KEY,

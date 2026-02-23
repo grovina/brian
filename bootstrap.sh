@@ -176,15 +176,8 @@ echo
 info "Created $(bold "${PROJECT_DIR}/.env") — fill in the empty values."
 info "Each field has a setup guide linked in the comments."
 
-if command -v cursor &>/dev/null; then
-  info "Opening in Cursor..."
-  cursor "$PROJECT_DIR/.env" 2>/dev/null || true
-elif command -v code &>/dev/null; then
-  info "Opening in VS Code..."
-  code "$PROJECT_DIR/.env" 2>/dev/null || true
-elif [[ "$(uname)" == "Darwin" ]]; then
-  info "Opening in TextEdit..."
-  open -t "$PROJECT_DIR/.env" 2>/dev/null || true
+if [[ "$(uname)" == "Darwin" ]]; then
+  open -t "$PROJECT_DIR/.env"
 elif command -v xdg-open &>/dev/null; then
   xdg-open "$PROJECT_DIR/.env" 2>/dev/null || true
 fi

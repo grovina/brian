@@ -26,7 +26,7 @@ export class VertexAIModel implements ModelProvider {
     this.ai = new GoogleGenAI({
       vertexai: true,
       project: config.project,
-      location: config.region ?? "europe-west1",
+      location: config.region ?? "global",
     });
     this.model = config.model ?? "gemini-3-flash-preview";
   }

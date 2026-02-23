@@ -189,7 +189,7 @@ const brian = new Brian({
 
   model: new VertexAIModel({
     project: process.env.GCP_PROJECT!,
-    region: process.env.GCP_REGION || 'europe-west1',
+    region: process.env.VERTEX_AI_LOCATION,
   }),
 
   wake: new AutonomousWake(),

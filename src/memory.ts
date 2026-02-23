@@ -7,39 +7,7 @@ export class Memory {
 
   async readMemory(): Promise<string> {
     try {
-      return await fs.readFile(path.join(this.stateDir, "MEMORY.md"), "utf-8");
-    } catch {
-      return "";
-    }
-  }
-
-  async readHeartbeat(): Promise<string> {
-    try {
-      return await fs.readFile(
-        path.join(this.stateDir, "HEARTBEAT.md"),
-        "utf-8"
-      );
-    } catch {
-      return "";
-    }
-  }
-
-  async readRecentDailyLogs(days: number = 3): Promise<string> {
-    const memoryDir = path.join(this.stateDir, "memory");
-    try {
-      const files = await fs.readdir(memoryDir);
-      const mdFiles = files.filter((f) => f.endsWith(".md")).sort().reverse();
-      const recent = mdFiles.slice(0, days);
-
-      const logs: string[] = [];
-      for (const file of recent) {
-        const content = await fs.readFile(
-          path.join(memoryDir, file),
-          "utf-8"
-        );
-        logs.push(`## ${file}\n${content}`);
-      }
-      return logs.join("\n\n");
+      return await fs.readFile(path.join(this.stateDir, "memory.md"), "utf-8");
     } catch {
       return "";
     }
@@ -47,7 +15,7 @@ export class Memory {
 
   todayLogPath(): string {
     const date = new Date().toISOString().split("T")[0];
-    return path.join(this.stateDir, "memory", `${date}.md`);
+    return path.join(this.stateDir, "logs", `${date}.md`);
   }
 }
 
@@ -58,14 +26,14 @@ export function memoryTools(stateDir: string): Tool[] {
       definition: {
         name: "memory_read",
         description:
-          "Read a memory file. Use 'MEMORY.md' for long-term knowledge, 'HEARTBEAT.md' for the heartbeat checklist, or 'memory/YYYY-MM-DD.md' for daily logs.",
+          "Read a file from the state directory. Use 'memory.md' for long-term knowledge, or 'logs/YYYY-MM-DD.md' for daily activity logs.",
         parameters: {
           type: "object",
           properties: {
             file: {
               type: "string",
               description:
-                "Relative path within the workspace (e.g. 'MEMORY.md', 'memory/2025-01-15.md')",
+                "Relative path within the state directory (e.g. 'memory.md', 'logs/2025-01-15.md')",
             },
           },
           required: ["file"],
@@ -78,7 +46,7 @@ export function memoryTools(stateDir: string): Tool[] {
           return await fs.readFile(fullPath, "utf-8");
         } catch (err) {
           if ((err as NodeJS.ErrnoException).code === "ENOENT")
-            return `Memory file not found: ${file}`;
+            return `File not found: ${file}`;
           throw err;
         }
       },
@@ -88,14 +56,14 @@ export function memoryTools(stateDir: string): Tool[] {
       definition: {
         name: "memory_write",
         description:
-          "Write or append to a memory file. For daily logs, append new entries. For MEMORY.md, update the full content to keep it organized.",
+          "Write to a file in the state directory. For memory.md, replace the full content to keep it organized. For logs, append entries.",
         parameters: {
           type: "object",
           properties: {
             file: {
               type: "string",
               description:
-                "Relative path within the workspace (e.g. 'MEMORY.md', 'memory/2025-01-15.md')",
+                "Relative path within the state directory (e.g. 'memory.md', 'logs/2025-01-15.md')",
             },
             content: {
               type: "string",
@@ -129,7 +97,7 @@ export function memoryTools(stateDir: string): Tool[] {
       name: "memory_search",
       definition: {
         name: "memory_search",
-        description: "Search memory files by keyword.",
+        description: "Search files in the state directory by keyword.",
         parameters: {
           type: "object",
           properties: {

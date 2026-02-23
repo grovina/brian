@@ -14,6 +14,7 @@ import { Memory } from "./memory.js";
 const MAX_TURNS = 80;
 const MAX_RETRIES = 3;
 const MAX_HISTORY_MESSAGES = 100;
+
 interface AgentConfig {
   name: string;
   stateDir: string;
@@ -59,7 +60,7 @@ export class Agent {
   constructor(config: AgentConfig) {
     this.config = config;
     this.toolMap = new Map(config.tools.map((t) => [t.name, t]));
-    this.stateFile = path.join(config.stateDir, "conversation-history.json");
+    this.stateFile = path.join(config.stateDir, "conversation.json");
   }
 
   async init(): Promise<void> {
@@ -85,7 +86,6 @@ export class Agent {
       minute: "2-digit",
     });
 
-    // Trim trailing user messages to maintain valid alternation
     while (
       this.history.length > 0 &&
       this.history[this.history.length - 1].role === "user"
@@ -212,7 +212,7 @@ export class Agent {
       );
       this.history = sanitizeHistory(trimmed);
       console.log(
-        `Restored ${this.history.length} messages from history`
+        `Restored ${this.history.length} messages from conversation`
       );
     } catch {
       console.log("Starting fresh conversation");
@@ -228,11 +228,7 @@ export class Agent {
       const clean = sanitizeHistory(toSave);
       await fs.writeFile(
         this.stateFile,
-        JSON.stringify(
-          { messages: clean, lastActivity: Date.now() },
-          null,
-          2
-        )
+        JSON.stringify({ messages: clean }, null, 2)
       );
     } catch (err) {
       console.error("Failed to save conversation state:", err);

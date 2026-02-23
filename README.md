@@ -49,7 +49,7 @@ src/
 ├── types.ts              # Core interfaces
 ├── agent.ts              # Model-agnostic agent loop
 ├── prompt.ts             # System prompt builder
-├── memory.ts             # Workspace: MEMORY.md, HEARTBEAT.md, daily logs
+├── memory.ts             # State: memory.md, conversation, logs
 ├── mcp.ts                # MCP server manager
 ├── logger.ts             # File + console logging
 ├── models/               # Model providers (catalog)
@@ -74,7 +74,7 @@ A brian built on this framework is a long-running process that:
 - **Wakes up on a schedule** — checks communication channels, ongoing tasks, notifications
 - **Acts autonomously** — uses tools (bash, MCP servers, memory) to get work done
 - **Controls its own schedule** — decides when to wake up next based on context
-- **Remembers across restarts** — persistent memory, conversation history, daily logs
+- **Remembers across restarts** — persistent memory, auto-compacted conversation, activity logs
 - **Improves itself** — can modify its own code, open PRs, and self-deploy
 
 ## Core Concepts
@@ -135,11 +135,10 @@ Brian stores state in `~/.brian/` (configurable via `stateDir`):
 
 ```
 ~/.brian/
-├── MEMORY.md                     # Long-term knowledge
-├── HEARTBEAT.md                  # Periodic checklist
-├── memory/YYYY-MM-DD.md          # Daily logs
-├── conversation-history.json     # Persistent conversation
-└── logs/                         # Process logs
+├── memory.md              # Long-term knowledge (agent-curated)
+├── conversation.json      # Conversation state with compacted summary
+└── logs/
+    └── YYYY-MM-DD.md      # Daily activity logs
 ```
 
 ## How Contributions Flow

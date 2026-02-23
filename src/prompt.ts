@@ -8,10 +8,7 @@ export async function buildSystemPrompt(params: {
   extraSections?: string[];
 }): Promise<string> {
   const memory = new Memory(params.stateDir);
-
   const memoryContent = await memory.readMemory();
-  const heartbeat = await memory.readHeartbeat();
-  const recentLogs = await memory.readRecentDailyLogs();
 
   let orgInstructions = "";
   if (params.instructions) {
@@ -37,7 +34,7 @@ Use your tools to interact with the world. You have bash for running commands, M
 
 ## Memory
 
-Your memory files in ${params.stateDir} are local working notes. MEMORY.md is long-term knowledge. HEARTBEAT.md is your periodic checklist. Daily logs track activity. If essential information emerges, commit it to the relevant project repo as documentation.
+Your state directory is ${params.stateDir}. memory.md is your long-term knowledge — facts, patterns, checklists, anything you want to persist. Your conversation history is recent context only; older messages are discarded. Anything worth keeping long-term belongs in memory.md. If essential information emerges, commit it to the relevant project repo as documentation.
 
 ## Communication
 
@@ -54,8 +51,6 @@ Your git author name is "${params.name}".`,
 - Identity: ${params.name}`,
 
     memoryContent ? `## Memory\n\n${memoryContent}` : null,
-    heartbeat ? `## Checklist\n\n${heartbeat}` : null,
-    recentLogs ? `## Recent Activity\n\n${recentLogs}` : null,
     ...(params.extraSections ?? []),
   ];
 

@@ -56,11 +56,11 @@ export class VertexAIModel implements ModelProvider {
       },
     });
 
-    const parts: Part[] =
+    const rawParts: Part[] =
       response.candidates?.[0]?.content?.parts ?? [];
 
-    const text = parts
-      .filter((p: any) => p.text)
+    const text = rawParts
+      .filter((p: any) => p.text && !p.thought)
       .map((p: any) => p.text)
       .join("");
 
@@ -79,6 +79,7 @@ export class VertexAIModel implements ModelProvider {
         inputTokens: response.usageMetadata?.promptTokenCount ?? 0,
         outputTokens: response.usageMetadata?.candidatesTokenCount ?? 0,
       },
+      metadata: rawParts,
     };
   }
 
@@ -112,19 +113,23 @@ export class VertexAIModel implements ModelProvider {
           });
         }
       } else {
-        const parts: Part[] = [];
-        if (msg.text) {
-          parts.push({ text: msg.text });
-        }
-        if (msg.toolCalls) {
-          for (const tc of msg.toolCalls) {
-            parts.push({
-              functionCall: { name: tc.name, args: tc.args },
-            });
+        if (msg.metadata && Array.isArray(msg.metadata)) {
+          contents.push({ role: "model", parts: msg.metadata as Part[] });
+        } else {
+          const parts: Part[] = [];
+          if (msg.text) {
+            parts.push({ text: msg.text });
           }
-        }
-        if (parts.length > 0) {
-          contents.push({ role: "model", parts });
+          if (msg.toolCalls) {
+            for (const tc of msg.toolCalls) {
+              parts.push({
+                functionCall: { name: tc.name, args: tc.args },
+              });
+            }
+          }
+          if (parts.length > 0) {
+            contents.push({ role: "model", parts });
+          }
         }
       }
     }

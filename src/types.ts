@@ -21,12 +21,14 @@ export interface Message {
   toolCalls?: ToolCall[];
   toolResults?: ToolCallResult[];
   images?: ImageData[];
+  metadata?: unknown;
 }
 
 export interface ModelResponse {
   text?: string;
   toolCalls?: ToolCall[];
   usage?: { inputTokens: number; outputTokens: number };
+  metadata?: unknown;
 }
 
 export interface ToolDefinition {

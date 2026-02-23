@@ -112,6 +112,7 @@ export class Agent {
         role: "assistant",
         text: response.text,
         toolCalls: response.toolCalls,
+        metadata: response.metadata,
       });
 
       if (response.toolCalls && response.toolCalls.length > 0) {

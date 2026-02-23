@@ -297,8 +297,9 @@ gcloud compute scp $GCP_FLAGS "$ENV_FILE" "${VM}:/tmp/brian.env" < /dev/null
 
 info "Installing prerequisites on VM..."
 gcloud compute ssh "$VM" $GCP_FLAGS --command "
-  sudo apt-get update -qq &&
-  sudo apt-get install -y -qq git curl > /dev/null
+  export DEBIAN_FRONTEND=noninteractive &&
+  sudo -E apt-get update -qq &&
+  sudo -E apt-get install -y -qq git curl > /dev/null 2>&1
 " < /dev/null
 
 info "Running setup on VM..."

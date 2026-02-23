@@ -13,27 +13,19 @@ The bootstrap script forks this repo to your org, scaffolds your brian's project
 - **`your-org/brian`** — your fork of the framework (editable, stays in sync with upstream)
 - **`your-org/pickle`** — your brian's implementation (name, instructions, MCP configs, deploy scripts)
 
-## What You Get
-
-A brian built on this framework is a long-running process that:
-
-- **Wakes up on a schedule** — checks communication channels, ongoing tasks, notifications
-- **Acts autonomously** — uses tools (bash, MCP servers, memory) to get work done
-- **Controls its own schedule** — sleeps longer when idle, checks back quickly when busy
-- **Remembers across restarts** — persistent memory, conversation history, daily logs
-- **Improves itself** — can modify its own code, open PRs, and self-deploy
-
 ## Usage
 
 ```typescript
-import { Brian, VertexAI, PeriodicWake, bash, selfDeploy } from 'brian';
+import { Brian } from 'brian';
+import { AnthropicModel } from 'brian/models/anthropic';
+import { PeriodicWake } from 'brian/wake/periodic';
+import { bash, selfDeploy } from 'brian/tools';
 
 const brian = new Brian({
   name: process.env.BRIAN_NAME || 'brian',
 
-  model: new VertexAI({
-    project: process.env.GCP_PROJECT!,
-    region: process.env.GCP_REGION || 'europe-west1',
+  model: new AnthropicModel({
+    apiKey: process.env.ANTHROPIC_API_KEY,
   }),
 
   wake: new PeriodicWake({
@@ -52,6 +44,8 @@ await brian.start();
 
 ## Architecture
 
+The repo has two parts: the **core framework** (flat files in `src/`) and the **catalog** of pluggable modules (directories in `src/`).
+
 ```
 src/
 ├── index.ts              # Public API
@@ -62,37 +56,66 @@ src/
 ├── memory.ts             # Workspace: MEMORY.md, HEARTBEAT.md, daily logs
 ├── mcp.ts                # MCP server manager
 ├── logger.ts             # File + console logging
-├── models/
-│   └── vertex-ai.ts      # VertexAI (Gemini) provider
-├── wake/
-│   └── periodic.ts       # Periodic wake with backoff
-└── tools/
-    ├── bash.ts           # Shell execution
-    ├── memory.ts         # Memory read/write/search (built-in)
-    └── self-deploy.ts    # Self-deployment trigger
+├── models/               # Model providers (catalog)
+│   ├── vertex-ai.ts      # Google Vertex AI (Gemini)
+│   └── anthropic.ts      # Anthropic (Claude)
+├── tools/                # Tools (catalog)
+│   ├── bash.ts           # Shell execution
+│   └── self-deploy.ts    # Self-deployment trigger
+└── wake/                 # Wake strategies (catalog)
+    └── periodic.ts       # Periodic wake with backoff
+mcp/                      # Reference MCP server configs
+├── slack.json
+├── github.json
+├── postgres.json
+└── filesystem.json
 ```
+
+## What You Get
+
+A brian built on this framework is a long-running process that:
+
+- **Wakes up on a schedule** — checks communication channels, ongoing tasks, notifications
+- **Acts autonomously** — uses tools (bash, MCP servers, memory) to get work done
+- **Controls its own schedule** — sleeps longer when idle, checks back quickly when busy
+- **Remembers across restarts** — persistent memory, conversation history, daily logs
+- **Improves itself** — can modify its own code, open PRs, and self-deploy
 
 ## Core Concepts
 
 ### Model Providers
 
-Implement `ModelProvider` to add LLM backends. The framework ships with `VertexAI` (Gemini via Google Cloud).
+Implement `ModelProvider` to add LLM backends. The catalog ships with:
+
+- **`brian/models/vertex-ai`** — `VertexAIModel` (Gemini via Google Cloud)
+- **`brian/models/anthropic`** — `AnthropicModel` (Claude via Anthropic API)
+
+```typescript
+import { VertexAIModel } from 'brian/models/vertex-ai';
+import { AnthropicModel } from 'brian/models/anthropic';
+```
 
 ### Wake Strategies
 
-Implement `WakeStrategy` to control when brian wakes up. The framework ships with `PeriodicWake` — a timer with configurable backoff. Brian can also control its own schedule via the built-in `set_wake_interval` tool.
+Implement `WakeStrategy` to control when brian wakes up. The catalog ships with:
+
+- **`brian/wake/periodic`** — `PeriodicWake` with configurable backoff
+
+Brian can also control its own schedule via the built-in `set_wake_interval` tool.
 
 ### Tools
 
 Brian has three kinds of tools:
 
 1. **Built-in** — memory (read/write/search) and wake interval control. Always available.
-2. **Framework tools** — `bash` and `selfDeploy()`. Opt-in.
+2. **Catalog tools** — `bash` and `selfDeploy()`. Import from `brian/tools`.
 3. **MCP tools** — loaded from JSON configs. Any MCP-compatible server works.
 
 Custom tools implement the `Tool` interface:
 
 ```typescript
+import type { Tool } from 'brian';
+
 const myTool: Tool = {
   name: 'my_tool',
   definition: {
@@ -105,6 +128,12 @@ const myTool: Tool = {
   },
 };
 ```
+
+### MCP Configs
+
+The `mcp/` directory contains reference configs for common MCP servers. Copy the ones you need into your project's `mcp/` directory and set the required environment variables.
+
+Env vars in both `env` and `args` fields support `${VAR_NAME}` substitution from `process.env`.
 
 ### State
 

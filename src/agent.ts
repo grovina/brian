@@ -124,7 +124,7 @@ export class Agent {
         this.history.push({
           role: "user",
           toolResults: results.map((r, i) => ({
-            toolCallId: response.toolCalls![i].name,
+            toolCallId: response.toolCalls![i].id,
             result: typeof r === "string" ? r : r.text,
             images: typeof r !== "string" ? r.images : undefined,
           })),

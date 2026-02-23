@@ -1,3 +1,2 @@
-export { bashTool } from "./bash.js";
-export { selfDeployTool } from "./self-deploy.js";
-export { memoryTools } from "./memory.js";
+export { bashTool as bash } from "./bash.js";
+export { selfDeployTool as selfDeploy } from "./self-deploy.js";

@@ -4,7 +4,7 @@ import fs from "fs/promises";
 import type { BrianConfig, Tool } from "./types.js";
 import { Agent } from "./agent.js";
 import { MCPManager } from "./mcp.js";
-import { memoryTools } from "./tools/memory.js";
+import { memoryTools } from "./memory.js";
 import { initLogger } from "./logger.js";
 
 export class Brian {

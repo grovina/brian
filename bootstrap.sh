@@ -22,21 +22,25 @@ ask() {
   else
     printf "    %s: " "$(bold "$prompt")"
   fi
-  read -r value
+  read -r value < /dev/tty
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
   eval "$var_name=\"${value:-$default}\""
 }
 
 ask_secret() {
   local prompt="$1" var_name="$2"
   printf "    %s: " "$(bold "$prompt")"
-  read -rs value
+  read -rs value < /dev/tty
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
   echo
   eval "$var_name=\"$value\""
 }
 
 confirm() {
   printf "\n  %s " "$(bold "$1 (Y/n)")"
-  read -r answer
+  read -r answer < /dev/tty
   [[ -z "$answer" || "$answer" =~ ^[Yy] ]]
 }
 
@@ -179,8 +183,8 @@ cat > "$PROJECT_DIR/package.json" << PKGJSON
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/main.js",
-    "dev": "tsx src/main.ts",
+    "start": "node --env-file=.env dist/main.js",
+    "dev": "tsx --env-file=.env src/main.ts",
     "typecheck": "tsc --noEmit"
   },
   "engines": {
@@ -218,12 +222,15 @@ TSCONFIG
 ok "tsconfig.json"
 
 cat > "$PROJECT_DIR/src/main.ts" << MAIN
-import { Brian, VertexAI, PeriodicWake, bash, selfDeploy } from 'brian';
+import { Brian } from 'brian';
+import { VertexAIModel } from 'brian/models/vertex-ai';
+import { PeriodicWake } from 'brian/wake/periodic';
+import { bash, selfDeploy } from 'brian/tools';
 
 const brian = new Brian({
   name: process.env.BRIAN_NAME || '${BRIAN_NAME}',
 
-  model: new VertexAI({
+  model: new VertexAIModel({
     project: process.env.GCP_PROJECT!,
     region: process.env.GCP_REGION || 'europe-west1',
   }),

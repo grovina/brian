@@ -38,9 +38,13 @@ export class MCPManager {
   private toolMap = new Map<string, MCPToolInfo>();
 
   async addServer(config: MCPServerConfig): Promise<void> {
+    const resolvedArgs = (config.args ?? []).map((arg) =>
+      arg.replace(/\$\{(\w+)\}/g, (_, name) => process.env[name] ?? "")
+    );
+
     const transport = new StdioClientTransport({
       command: config.command,
-      args: config.args ?? [],
+      args: resolvedArgs,
       env: {
         ...(process.env as Record<string, string>),
         PATH: augmentedPath,

@@ -18,7 +18,7 @@ export interface VertexAIConfig {
   model?: string;
 }
 
-export class VertexAI implements ModelProvider {
+export class VertexAIModel implements ModelProvider {
   private ai: GoogleGenAI;
   private model: string;
 
@@ -65,8 +65,8 @@ export class VertexAI implements ModelProvider {
       .join("");
 
     const toolCalls: ToolCall[] = (response.functionCalls ?? []).map(
-      (fc, i) => ({
-        id: `call_${i}`,
+      (fc) => ({
+        id: fc.name!,
         name: fc.name!,
         args: (fc.args as Record<string, unknown>) ?? {},
       })

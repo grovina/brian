@@ -6,7 +6,6 @@ import type {
   Tool,
   ToolDefinition,
   ToolResult,
-  WakeResult,
 } from "./types.js";
 import { buildSystemPrompt } from "./prompt.js";
 import { MCPManager } from "./mcp.js";
@@ -15,8 +14,6 @@ import { Memory } from "./memory.js";
 const MAX_TURNS = 80;
 const MAX_RETRIES = 3;
 const MAX_HISTORY_MESSAGES = 100;
-const ACTIVE_TOOL_CALL_THRESHOLD = 2;
-
 interface AgentConfig {
   name: string;
   stateDir: string;
@@ -24,6 +21,7 @@ interface AgentConfig {
   tools: Tool[];
   mcp: MCPManager;
   instructions?: string;
+  extraPromptSections?: string[];
 }
 
 function sanitizeHistory(messages: Message[]): Message[] {
@@ -57,7 +55,6 @@ export class Agent {
   private config: AgentConfig;
   private toolMap: Map<string, Tool>;
   private stateFile: string;
-  private nextWakeMinutes?: number;
 
   constructor(config: AgentConfig) {
     this.config = config;
@@ -69,14 +66,14 @@ export class Agent {
     await this.loadHistory();
   }
 
-  async run(): Promise<WakeResult> {
-    this.nextWakeMinutes = undefined;
+  async run(): Promise<void> {
     const startTime = Date.now();
 
     const systemPrompt = await buildSystemPrompt({
       name: this.config.name,
       stateDir: this.config.stateDir,
       instructions: this.config.instructions,
+      extraSections: this.config.extraPromptSections,
     });
 
     const now = new Date();
@@ -142,15 +139,6 @@ export class Agent {
       tokensOut,
       durationMs: Date.now() - startTime,
     });
-
-    return {
-      active: toolCalls > ACTIVE_TOOL_CALL_THRESHOLD,
-      nextWakeMinutes: this.nextWakeMinutes,
-    };
-  }
-
-  setNextWake(minutes: number): void {
-    this.nextWakeMinutes = minutes;
   }
 
   private getAllToolDefinitions(): ToolDefinition[] {

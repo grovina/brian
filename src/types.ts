@@ -51,14 +51,11 @@ export interface ModelProvider {
   }): Promise<ModelResponse>;
 }
 
-export interface WakeResult {
-  active: boolean;
-  nextWakeMinutes?: number;
-}
-
 export interface WakeStrategy {
-  start(handler: () => Promise<WakeResult>): Promise<void>;
+  start(handler: () => Promise<void>): Promise<void>;
   stop(): Promise<void>;
+  tools?(): Tool[];
+  promptSection?(): string;
 }
 
 export interface BrianConfig {

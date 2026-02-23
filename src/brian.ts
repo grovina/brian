@@ -28,6 +28,8 @@ export class Brian {
     await this.loadMCP();
 
     const tools = this.resolveTools();
+    const wakePrompt = this.config.wake.promptSection?.();
+
     this.agent = new Agent({
       name: this.config.name,
       stateDir: this.stateDir,
@@ -35,6 +37,7 @@ export class Brian {
       tools,
       mcp: this.mcp,
       instructions: this.config.instructions,
+      extraPromptSections: wakePrompt ? [wakePrompt] : undefined,
     });
 
     await this.agent.init();
@@ -52,11 +55,8 @@ export class Brian {
   private resolveTools(): Tool[] {
     const tools: Tool[] = [];
 
-    // Built-in: memory tools
     tools.push(...memoryTools(this.stateDir));
-
-    // Built-in: set_wake_interval
-    tools.push(this.createWakeIntervalTool());
+    tools.push(...(this.config.wake.tools?.() ?? []));
 
     // User-provided tools (flatten nested arrays)
     if (this.config.tools) {
@@ -70,40 +70,6 @@ export class Brian {
     }
 
     return tools;
-  }
-
-  private createWakeIntervalTool(): Tool {
-    return {
-      name: "set_wake_interval",
-      definition: {
-        name: "set_wake_interval",
-        description:
-          "Set how many minutes until the next wake. Use this to control your own schedule — short intervals when you're actively working on something, longer when things are quiet.",
-        parameters: {
-          type: "object",
-          properties: {
-            minutes: {
-              type: "number",
-              description: "Minutes until next wake",
-            },
-            reason: {
-              type: "string",
-              description: "Why this interval (for your own logs)",
-            },
-          },
-          required: ["minutes"],
-        },
-      },
-      execute: async (input) => {
-        const { minutes, reason } = input as {
-          minutes: number;
-          reason?: string;
-        };
-        this.agent.setNextWake(minutes);
-        const msg = `Wake interval set to ${minutes} minutes`;
-        return reason ? `${msg} (${reason})` : msg;
-      },
-    };
   }
 
   private async loadMCP(): Promise<void> {

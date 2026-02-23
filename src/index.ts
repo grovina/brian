@@ -5,7 +5,6 @@ export type {
   ModelProvider,
   ModelResponse,
   WakeStrategy,
-  WakeResult,
   Tool,
   ToolDefinition,
   ToolResult,
@@ -15,6 +14,9 @@ export type {
   ImageData,
 } from "./types.js";
 
-export { PeriodicWake, type PeriodicWakeConfig } from "./wake/periodic.js";
+export {
+  AutonomousWake,
+  type AutonomousWakeConfig,
+} from "./wake/autonomous.js";
 
 export { bash, selfDeploy } from "./tools/index.js";

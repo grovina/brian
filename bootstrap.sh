@@ -309,7 +309,7 @@ ok "tsconfig.json"
 
 if [[ "$MODEL_PROVIDER" == "vertex-ai" ]]; then
   cat > "$PROJECT_DIR/src/main.ts" << MAIN
-import { Brian, PeriodicWake, bash, selfDeploy } from 'brian';
+import { Brian, AutonomousWake, bash, selfDeploy } from 'brian';
 import { VertexAIModel } from 'brian/models/vertex-ai';
 
 const brian = new Brian({
@@ -320,10 +320,7 @@ const brian = new Brian({
     region: process.env.GCP_REGION || 'europe-west1',
   }),
 
-  wake: new PeriodicWake({
-    intervalMinutes: 3,
-    maxIntervalMinutes: 60,
-  }),
+  wake: new AutonomousWake(),
 
   tools: [bash, selfDeploy()],
 
@@ -335,7 +332,7 @@ await brian.start();
 MAIN
 else
   cat > "$PROJECT_DIR/src/main.ts" << MAIN
-import { Brian, PeriodicWake, bash, selfDeploy } from 'brian';
+import { Brian, AutonomousWake, bash, selfDeploy } from 'brian';
 import { AnthropicModel } from 'brian/models/anthropic';
 
 const brian = new Brian({
@@ -345,10 +342,7 @@ const brian = new Brian({
     apiKey: process.env.ANTHROPIC_API_KEY,
   }),
 
-  wake: new PeriodicWake({
-    intervalMinutes: 3,
-    maxIntervalMinutes: 60,
-  }),
+  wake: new AutonomousWake(),
 
   tools: [bash, selfDeploy()],
 

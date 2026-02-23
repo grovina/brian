@@ -1,1 +1,1 @@
-export { PeriodicWake, type PeriodicWakeConfig } from "./periodic.js";
+export { AutonomousWake, type AutonomousWakeConfig } from "./autonomous.js";

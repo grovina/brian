@@ -16,7 +16,7 @@ The bootstrap script forks this repo to your org, scaffolds your brian's project
 ## Usage
 
 ```typescript
-import { Brian, PeriodicWake, bash, selfDeploy } from 'brian';
+import { Brian, AutonomousWake, bash, selfDeploy } from 'brian';
 import { AnthropicModel } from 'brian/models/anthropic';
 // or: import { VertexAIModel } from 'brian/models/vertex-ai';
 
@@ -27,10 +27,7 @@ const brian = new Brian({
     apiKey: process.env.ANTHROPIC_API_KEY,
   }),
 
-  wake: new PeriodicWake({
-    intervalMinutes: 3,
-    maxIntervalMinutes: 60,
-  }),
+  wake: new AutonomousWake(),
 
   tools: [bash, selfDeploy()],
 
@@ -62,7 +59,7 @@ src/
 │   ├── bash.ts           # Shell execution
 │   └── self-deploy.ts    # Self-deployment trigger
 └── wake/                 # Wake strategies (catalog)
-    └── periodic.ts       # Periodic wake with backoff
+    └── autonomous.ts     # Model-driven autonomous scheduling
 mcp/                      # Reference MCP server configs
 ├── slack.json
 ├── github.json
@@ -76,7 +73,7 @@ A brian built on this framework is a long-running process that:
 
 - **Wakes up on a schedule** — checks communication channels, ongoing tasks, notifications
 - **Acts autonomously** — uses tools (bash, MCP servers, memory) to get work done
-- **Controls its own schedule** — sleeps longer when idle, checks back quickly when busy
+- **Controls its own schedule** — decides when to wake up next based on context
 - **Remembers across restarts** — persistent memory, conversation history, daily logs
 - **Improves itself** — can modify its own code, open PRs, and self-deploy
 
@@ -96,17 +93,15 @@ import { AnthropicModel } from 'brian/models/anthropic';
 
 ### Wake Strategies
 
-Implement `WakeStrategy` to control when brian wakes up. The catalog ships with:
+Implement `WakeStrategy` to control when brian wakes up. Strategies can inject their own tools and prompt sections. The catalog ships with:
 
-- **`brian/wake/periodic`** — `PeriodicWake` with configurable backoff
-
-Brian can also control its own schedule via the built-in `set_wake_interval` tool.
+- **`brian/wake/autonomous`** — `AutonomousWake` — the model decides when to wake up next via a `done` tool
 
 ### Tools
 
 Brian has three kinds of tools:
 
-1. **Built-in** — memory (read/write/search) and wake interval control. Always available.
+1. **Built-in** — memory (read/write/search) and wake strategy tools. Always available.
 2. **Catalog tools** — `bash` and `selfDeploy()`. Import from `brian/tools`.
 3. **MCP tools** — loaded from JSON configs. Any MCP-compatible server works.
 

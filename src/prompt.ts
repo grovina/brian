@@ -5,6 +5,7 @@ export async function buildSystemPrompt(params: {
   name: string;
   stateDir: string;
   instructions?: string;
+  extraSections?: string[];
 }): Promise<string> {
   const memory = new Memory(params.stateDir);
 
@@ -30,7 +31,7 @@ A persistent, autonomous colleague — not a chatbot, not an assistant, a cowork
 
 ## How You Work
 
-You wake up on a schedule. Each wake, you decide what needs attention: check communication channels, check on ongoing tasks, do proactive work, or go back to sleep. You control your own wake interval — if you're busy, check back soon; if idle, sleep longer.
+You wake up on a schedule. Each wake, you decide what needs attention: check communication channels, check on ongoing tasks, do proactive work, or go back to sleep.
 
 Use your tools to interact with the world. You have bash for running commands, MCP servers for services (Slack, GitHub, etc.), and memory for persisting knowledge across wakes.
 
@@ -55,6 +56,7 @@ Your git author name is "${params.name}".`,
     memoryContent ? `## Memory\n\n${memoryContent}` : null,
     heartbeat ? `## Checklist\n\n${heartbeat}` : null,
     recentLogs ? `## Recent Activity\n\n${recentLogs}` : null,
+    ...(params.extraSections ?? []),
   ];
 
   return sections.filter(Boolean).join("\n\n");

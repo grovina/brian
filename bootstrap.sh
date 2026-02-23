@@ -588,6 +588,9 @@ run_provision() {
 cmd_deploy_gcp() {
   load_env && gcp_vars
 
+  echo "Enabling Vertex AI API..."
+  gcloud services enable aiplatform.googleapis.com --project="$GCP_PROJECT" 2>/dev/null || true
+
   REMOTE_SSH="gcloud compute ssh $VM --zone=$ZONE --command"
   REMOTE_SCP="gcloud compute scp --zone=$ZONE"
   REMOTE_TARGET="$VM"
@@ -732,6 +735,7 @@ step "Installing dependencies"
 
 npm install 2>&1 | tail -3
 ok "npm install"
+
 
 # ─────────────────────────────────────────────────
 # Phase 6: Summary

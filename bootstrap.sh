@@ -93,6 +93,16 @@ if ! command -v git &>/dev/null; then
 fi
 ok "git"
 
+if ! command -v gcloud &>/dev/null; then
+  fail "gcloud not found — install from https://cloud.google.com/sdk/docs/install"
+  exit 1
+fi
+if ! gcloud auth print-access-token &>/dev/null; then
+  fail "gcloud not authenticated — run $(bold "gcloud auth login")"
+  exit 1
+fi
+ok "gcloud"
+
 if command -v gh &>/dev/null; then
   if gh auth status &>/dev/null; then
     HAS_GH=true
@@ -112,8 +122,8 @@ fi
 
 step "Configuration"
 
-ask "github org" "" GITHUB_ORG
-ask "bot name" "" BRIAN_NAME
+ask "GitHub org (repos will be created here)" "" GITHUB_ORG
+ask "bot name (also the repo and VM name)" "" BRIAN_NAME
 
 if [[ -z "$BRIAN_NAME" ]]; then
   fail "A name is required"
@@ -126,13 +136,42 @@ if [[ "$BRIAN_NAME" == "brian" ]]; then
   exit 1
 fi
 
+BRIAN_FORK_EXISTS=false
+BOT_REPO_EXISTS=false
+
+if [[ -n "$GITHUB_ORG" ]] && $HAS_GH; then
+  if gh repo view "${GITHUB_ORG}/brian" &>/dev/null; then
+    FORK_PARENT=$(gh repo view "${GITHUB_ORG}/brian" --json parent --jq '.parent.owner.login + "/" + .parent.name' 2>/dev/null)
+    if [[ "$FORK_PARENT" == "grovina/brian" ]]; then
+      BRIAN_FORK_EXISTS=true
+      skip "${GITHUB_ORG}/brian fork already exists"
+    else
+      fail "${GITHUB_ORG}/brian already exists but is not a fork of grovina/brian"
+      info "The brian framework needs this repo name."
+      info "Rename or remove the existing repo, then re-run."
+      exit 1
+    fi
+  fi
+
+  if gh repo view "${GITHUB_ORG}/${BRIAN_NAME}" &>/dev/null; then
+    if gh api "repos/${GITHUB_ORG}/${BRIAN_NAME}/contents/please" &>/dev/null; then
+      BOT_REPO_EXISTS=true
+      skip "${GITHUB_ORG}/${BRIAN_NAME} already exists (previous run)"
+    else
+      fail "${GITHUB_ORG}/${BRIAN_NAME} already exists and is not a brian project"
+      info "Pick a different bot name or remove the existing repo."
+      exit 1
+    fi
+  fi
+fi
+
 echo
 ask_choice "model provider" MODEL_CHOICE "Vertex AI (Gemini)" "Anthropic (Claude)"
 
 if (( MODEL_CHOICE == 0 )); then
   MODEL_PROVIDER="vertex-ai"
-  ask "gcp project" "" GCP_PROJECT
-  ask "gcp region" "europe-west1" GCP_REGION
+  ask "GCP project (for Vertex AI)" "" GCP_PROJECT
+  ask "Vertex AI region" "europe-west1" GCP_REGION
   if [[ -z "$GCP_PROJECT" ]]; then
     fail "GCP project is required for Vertex AI"
     exit 1
@@ -151,38 +190,42 @@ PROJECT_DIR="${BRIAN_NAME}"
 DOCS_BASE="https://github.com/grovina/brian/blob/main/docs"
 mkdir -p "$PROJECT_DIR"
 
-{
-  echo "BRIAN_NAME=${BRIAN_NAME}"
-  echo "GITHUB_ORG=${GITHUB_ORG}"
-  echo ""
-  if [[ "$MODEL_PROVIDER" == "vertex-ai" ]]; then
-    echo "# Vertex AI — ${DOCS_BASE}/vertex-ai-setup.md"
-    echo "GCP_PROJECT=${GCP_PROJECT}"
-    echo "GCP_REGION=${GCP_REGION}"
-  else
-    echo "# Anthropic — ${DOCS_BASE}/anthropic-setup.md"
-    echo "ANTHROPIC_API_KEY=    # sk-ant-..."
+if [[ -f "$PROJECT_DIR/.env" ]]; then
+  skip ".env already exists — keeping existing values"
+else
+  {
+    echo "BRIAN_NAME=${BRIAN_NAME}"
+    echo "GITHUB_ORG=${GITHUB_ORG}"
+    echo ""
+    if [[ "$MODEL_PROVIDER" == "vertex-ai" ]]; then
+      echo "# Vertex AI — ${DOCS_BASE}/vertex-ai-setup.md"
+      echo "GCP_PROJECT=${GCP_PROJECT}"
+      echo "GCP_REGION=${GCP_REGION}"
+    else
+      echo "# Anthropic — ${DOCS_BASE}/anthropic-setup.md"
+      echo "ANTHROPIC_API_KEY=    # sk-ant-..."
+    fi
+    echo ""
+    echo "# Slack user token — ${DOCS_BASE}/slack-setup.md"
+    echo "SLACK_TOKEN=    # xoxp-..."
+    echo ""
+    echo "# GitHub PAT for brian — ${DOCS_BASE}/github-setup.md"
+    echo "GITHUB_TOKEN=    # ghp_..."
+  } > "$PROJECT_DIR/.env"
+
+  step "Fill in your tokens"
+  echo
+  info "Created $(bold "${PROJECT_DIR}/.env") — fill in the empty values."
+  info "Each field has a setup guide linked in the comments."
+
+  if [[ "$(uname)" == "Darwin" ]]; then
+    open -t "$PROJECT_DIR/.env"
+  elif command -v xdg-open &>/dev/null; then
+    xdg-open "$PROJECT_DIR/.env" 2>/dev/null || true
   fi
-  echo ""
-  echo "# Slack user token — ${DOCS_BASE}/slack-setup.md"
-  echo "SLACK_TOKEN=    # xoxp-..."
-  echo ""
-  echo "# GitHub PAT for brian — ${DOCS_BASE}/github-setup.md"
-  echo "GITHUB_TOKEN=    # ghp_..."
-} > "$PROJECT_DIR/.env"
 
-step "Fill in your tokens"
-echo
-info "Created $(bold "${PROJECT_DIR}/.env") — fill in the empty values."
-info "Each field has a setup guide linked in the comments."
-
-if [[ "$(uname)" == "Darwin" ]]; then
-  open -t "$PROJECT_DIR/.env"
-elif command -v xdg-open &>/dev/null; then
-  xdg-open "$PROJECT_DIR/.env" 2>/dev/null || true
+  wait_for_enter "Press Enter when ready..."
 fi
-
-wait_for_enter "Press Enter when ready..."
 
 # ─────────────────────────────────────────────────
 # Phase 4: Read .env, validate, plan
@@ -244,7 +287,7 @@ fi
 if [[ -n "$GITHUB_ORG" ]] && $HAS_GH; then
   step "Forking framework"
 
-  if gh repo view "${GITHUB_ORG}/brian" &>/dev/null; then
+  if $BRIAN_FORK_EXISTS; then
     skip "Fork ${GITHUB_ORG}/brian already exists"
   else
     gh repo fork grovina/brian --org "$GITHUB_ORG" --clone=false 2>/dev/null
@@ -487,6 +530,12 @@ set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 ENV_FILE="$DIR/.env"
 
+confirm() {
+  printf "%s " "$1 (Y/n)"
+  read -r answer < /dev/tty
+  [[ -z "$answer" || "$answer" =~ ^[Yy] ]]
+}
+
 load_env() {
   if [[ ! -f "$ENV_FILE" ]]; then
     echo "Missing .env file. Copy .env.example and fill in your values."
@@ -719,10 +768,10 @@ if [[ -n "$GITHUB_ORG" ]] && $HAS_GH; then
   git add -A
   git commit -q -m "initial ${BRIAN_NAME}" --allow-empty 2>/dev/null || true
 
-  if gh repo view "${GITHUB_ORG}/${BRIAN_NAME}" &>/dev/null; then
+  if $BOT_REPO_EXISTS; then
     skip "Repo ${GITHUB_ORG}/${BRIAN_NAME} already exists"
     git remote add origin "https://github.com/${GITHUB_ORG}/${BRIAN_NAME}.git" 2>/dev/null || true
-    git push -u origin main 2>/dev/null || true
+    git push -u origin main --force-with-lease
   else
     gh repo create "${GITHUB_ORG}/${BRIAN_NAME}" --private --source=. --push
     ok "Created ${GITHUB_ORG}/${BRIAN_NAME}"
@@ -744,14 +793,141 @@ step "Installing dependencies"
 npm install 2>&1 | tail -3
 ok "npm install"
 
+# ─────────────────────────────────────────────────
+# Phase 6: Deploy to GCP
+# ─────────────────────────────────────────────────
+
+step "Deploying to GCP"
+
+VM="${BRIAN_NAME}"
+ZONE="${GCE_ZONE:-europe-west1-b}"
+MACHINE_TYPE="${GCE_MACHINE_TYPE:-e2-small}"
+BOOT_DISK_SIZE="${GCE_BOOT_DISK_SIZE:-20GB}"
+
+if [[ -n "${GCP_PROJECT:-}" ]]; then
+  info "Enabling Vertex AI API..."
+  if ! gcloud services enable aiplatform.googleapis.com --project="$GCP_PROJECT" 2>&1; then
+    fail "Failed to enable Vertex AI API on project '$GCP_PROJECT'"
+    info "This could mean missing permissions or wrong project ID."
+    if ! confirm "Continue anyway?"; then
+      exit 1
+    fi
+  fi
+fi
+
+if ! gcloud compute instances describe "$VM" --zone="$ZONE" &>/dev/null; then
+  info "Creating VM $(bold "$VM") ($MACHINE_TYPE, $BOOT_DISK_SIZE)..."
+  gcloud compute instances create "$VM" \
+    --zone="$ZONE" \
+    --machine-type="$MACHINE_TYPE" \
+    --boot-disk-size="$BOOT_DISK_SIZE" \
+    --image-family="debian-12" \
+    --image-project="debian-cloud" \
+    --scopes="https://www.googleapis.com/auth/cloud-platform" \
+    --tags="brian"
+
+  info "Waiting for SSH..."
+  for i in {1..30}; do
+    if gcloud compute ssh "$VM" --zone="$ZONE" --command "true" &>/dev/null; then break; fi
+    sleep 5
+  done
+  ok "VM created"
+else
+  ok "VM $VM already exists"
+fi
+
+REMOTE_SSH="gcloud compute ssh $VM --zone=$ZONE --command"
+REMOTE_SCP="gcloud compute scp --zone=$ZONE"
+
+info "Installing system packages..."
+$REMOTE_SSH "
+  sudo apt-get update &&
+  sudo apt-get install -y curl git build-essential ca-certificates gnupg &&
+  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash - &&
+  sudo apt-get install -y nodejs
+"
+
+info "Setting up brian user..."
+$REMOTE_SSH "
+  id brian &>/dev/null || sudo useradd -m -s /bin/bash brian &&
+  echo 'brian ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart brian, /usr/bin/systemctl stop brian, /usr/bin/systemctl start brian, /usr/bin/systemctl daemon-reload' | sudo tee /etc/sudoers.d/brian > /dev/null &&
+  sudo chmod 440 /etc/sudoers.d/brian
+"
+
+info "Deploying environment..."
+$REMOTE_SCP ".env" "${VM}:/tmp/brian.env"
+$REMOTE_SSH "
+  sudo mkdir -p /etc/brian &&
+  sudo mv /tmp/brian.env /etc/brian/env &&
+  sudo chmod 600 /etc/brian/env
+"
+
+info "Configuring git..."
+$REMOTE_SSH "
+  sudo -u brian git config --global user.name '${BRIAN_NAME}' &&
+  sudo -u brian git config --global user.email '${BRIAN_NAME}@${GITHUB_ORG:-local}.com'
+"
+
+if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+  $REMOTE_SSH "
+    sudo -u brian git config --global credential.helper store &&
+    echo 'https://x-access-token:${GITHUB_TOKEN}@github.com' | sudo -u brian tee /home/brian/.git-credentials > /dev/null &&
+    sudo chmod 600 /home/brian/.git-credentials
+  "
+fi
+
+REPO_URL=""
+if [[ -n "${GITHUB_ORG:-}" && -n "${GITHUB_TOKEN:-}" ]]; then
+  REPO_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_ORG}/${BRIAN_NAME}.git"
+else
+  REPO_URL="$(git remote get-url origin 2>/dev/null || echo '')"
+fi
+
+if [[ -n "$REPO_URL" ]]; then
+  info "Cloning and building..."
+  $REMOTE_SSH "
+    sudo -u brian bash -c '
+      set -e
+      if [ -d /home/brian/app ]; then
+        cd /home/brian/app && git pull origin main
+      else
+        git clone $REPO_URL /home/brian/app
+        cd /home/brian/app
+      fi
+      npm install && npm run build
+      mkdir -p /home/brian/projects
+      cp setup/deploy-self.sh /home/brian/deploy-self.sh
+      chmod +x /home/brian/deploy-self.sh
+    '
+  "
+fi
+
+info "Installing systemd service..."
+$REMOTE_SSH "
+  sudo cp /home/brian/app/setup/brian.service /etc/systemd/system/brian.service &&
+  sudo systemctl daemon-reload &&
+  sudo systemctl enable brian &&
+  sudo systemctl restart brian
+"
+
+info "Waiting for startup..."
+sleep 10
+
+if $REMOTE_SSH "systemctl is-active brian" &>/dev/null; then
+  ok "${BRIAN_NAME} is running"
+else
+  fail "${BRIAN_NAME} failed to start"
+  info "Check logs: gcloud compute ssh $VM --zone=$ZONE --command 'journalctl -u brian -n 50'"
+  exit 1
+fi
 
 # ─────────────────────────────────────────────────
-# Phase 6: Summary
+# Phase 7: Summary
 # ─────────────────────────────────────────────────
 
 step "Done!"
 echo
-info "$(bold "$BRIAN_NAME") is ready in $(bold "./$PROJECT_DIR/")"
+info "$(bold "$BRIAN_NAME") is running on GCP."
 echo
 
 if [[ -n "$GITHUB_ORG" ]] && $HAS_GH; then
@@ -761,11 +937,10 @@ if [[ -n "$GITHUB_ORG" ]] && $HAS_GH; then
   echo
 fi
 
-info "$(dim "next steps:")"
+info "$(dim "manage:")"
 info "  $(bold "cd ${PROJECT_DIR}")"
-info "  $(bold "npm run dev")              run locally"
-info "  $(bold "./please deploy gcp")      deploy to a GCP VM"
-echo
-info "${BRIAN_NAME} will introduce itself on Slack"
-info "and help set up everything else."
+info "  $(bold "./please logs")             tail logs"
+info "  $(bold "./please ssh")              SSH into the VM"
+info "  $(bold "./please restart")          pull latest and restart"
+info "  $(bold "./please destroy")          tear down the VM"
 echo

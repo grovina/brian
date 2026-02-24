@@ -25,7 +25,7 @@ This creates credentials at `~/.config/gcloud/application_default_credentials.js
 
 ## 4. Authenticate on a VM (production)
 
-For GCP VMs, brian authenticates via the VM's service account. The `./please deploy gcp` script creates the VM with the right scopes automatically. No extra setup needed.
+For GCP VMs, brian authenticates via the VM's service account. The bootstrap script creates the VM with the right scopes automatically. No extra setup needed.
 
 For non-GCP servers, create a service account:
 

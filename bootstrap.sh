@@ -362,21 +362,58 @@ ok "SSH connected"
 info "Copying environment to VM..."
 gcloud compute scp $GCP_FLAGS "$ENV_FILE" "${VM}:/tmp/brian.env" < /dev/null > /dev/null 2>&1
 
-info "Installing prerequisites on VM..."
-gcloud compute ssh "$VM" $GCP_FLAGS --command "
-  export DEBIAN_FRONTEND=noninteractive &&
-  sudo -E apt-get update -qq &&
-  sudo -E apt-get install -y -qq git curl > /dev/null 2>&1
-" < /dev/null
-
 info "Running setup on VM..."
 if ! gcloud compute ssh "$VM" $GCP_FLAGS --command "
+  export DEBIAN_FRONTEND=noninteractive &&
+
+  # Environment
   sudo mkdir -p /etc/brian &&
   sudo mv /tmp/brian.env /etc/brian/env &&
   sudo chmod 600 /etc/brian/env &&
-  git clone https://github.com/${BRIAN_REPO}.git /tmp/brian-setup > /dev/null 2>&1 ||
-    git -C /tmp/brian-setup pull > /dev/null 2>&1 &&
-  DEBIAN_FRONTEND=noninteractive /tmp/brian-setup/please setup
+  source /etc/brian/env &&
+
+  # System packages + Node
+  sudo -E apt-get update -qq &&
+  sudo -E apt-get install -y -qq curl git build-essential ca-certificates gnupg > /dev/null 2>&1 &&
+  if ! command -v node &>/dev/null; then
+    curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash - &&
+    sudo apt-get install -y -qq nodejs > /dev/null 2>&1
+  fi &&
+
+  # Brian user
+  id brian &>/dev/null || sudo useradd -m -s /bin/bash brian &&
+  echo 'brian ALL=(ALL) NOPASSWD: ALL' | sudo tee /etc/sudoers.d/brian > /dev/null &&
+  sudo chmod 440 /etc/sudoers.d/brian &&
+
+  # Git credentials
+  sudo -u brian git config --global user.name \"\${BRIAN_NAME}\" &&
+  sudo -u brian git config --global user.email \"\${BRIAN_NAME}@\${GITHUB_ORG:-local}.com\" &&
+  if [ -n \"\${GITHUB_TOKEN:-}\" ]; then
+    sudo -u brian git config --global credential.helper store &&
+    echo \"https://x-access-token:\${GITHUB_TOKEN}@github.com\" | sudo -u brian tee /home/brian/.git-credentials > /dev/null &&
+    sudo chmod 600 /home/brian/.git-credentials
+  fi &&
+
+  # Framework
+  FRAMEWORK_DIR=/home/brian/brian &&
+  if [ -d \"\$FRAMEWORK_DIR/.git\" ]; then
+    sudo -u brian git -C \"\$FRAMEWORK_DIR\" fetch origin main -q &&
+    sudo -u brian git -C \"\$FRAMEWORK_DIR\" reset --hard origin/main -q
+  else
+    sudo -u brian git clone -q \"https://github.com/${BRIAN_REPO}.git\" \"\$FRAMEWORK_DIR\"
+  fi &&
+  sudo -u brian bash -c \"cd \$FRAMEWORK_DIR && npm install --silent && npm run build --silent\" &&
+
+  # Install brian CLI
+  sudo ln -sf \"\$FRAMEWORK_DIR/dist/cli/brian.js\" /usr/local/bin/brian &&
+
+  # Scaffold + modules + service
+  sudo -u brian -E bash -c '
+    export BRIAN_APP_DIR=/home/brian/app
+    export BRIAN_STATE_DIR=/home/brian/.brian
+    export BRIAN_FRAMEWORK_DIR=/home/brian/brian
+    brian setup
+  '
 " < /dev/null 2>&1 | sed 's/^/    /'; then
   fail "Setup failed on VM"
   info "SSH in to debug: gcloud compute ssh $VM $GCP_FLAGS"

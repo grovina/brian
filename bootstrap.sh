@@ -239,6 +239,59 @@ if (( ${#MISSING[@]} > 0 )); then
   exit 1
 fi
 
+# Create local control helper for this bot
+CTL_FILE=~/.brian/${GITHUB_ORG}.${BRIAN_NAME}.ctl
+cat > "$CTL_FILE" <<EOF
+#!/bin/bash
+set -euo pipefail
+
+ENV_FILE="$ENV_FILE"
+source "\$ENV_FILE"
+
+if ! command -v gcloud &>/dev/null; then
+  echo "gcloud not found"
+  exit 1
+fi
+
+VM="\${BRIAN_NAME}"
+ZONE="\${GCP_REGION}-b"
+GCP_FLAGS=(--project="\${GCP_PROJECT}" --zone="\${ZONE}")
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  ctl status
+  ctl logs [-f]
+  ctl restart
+  ctl ssh
+USAGE
+}
+
+cmd="\${1:-help}"
+case "\$cmd" in
+  status)
+    gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "systemctl is-active brian" < /dev/null
+    ;;
+  logs)
+    if [[ "\${2:-}" == "-f" ]]; then
+      gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "journalctl -u brian -f --no-pager" < /dev/null
+    else
+      gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "journalctl -u brian -n 100 --no-pager" < /dev/null
+    fi
+    ;;
+  restart)
+    gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "sudo systemctl restart brian && systemctl is-active brian" < /dev/null
+    ;;
+  ssh)
+    gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}"
+    ;;
+  help|*)
+    usage
+    ;;
+esac
+EOF
+chmod +x "$CTL_FILE"
+
 # ─────────────────────────────────────────────────
 # Fork framework
 # ─────────────────────────────────────────────────
@@ -350,6 +403,10 @@ step "Done!"
 echo
 info "$(bold "$BRIAN_NAME") is running on GCP."
 echo
-info "$(dim "manage (from the VM):")"
-info "  gcloud compute ssh $VM $GCP_FLAGS"
+info "$(dim "day-2 commands (from your machine):")"
+info "  $CTL_FILE status"
+info "  $CTL_FILE logs"
+info "  $CTL_FILE logs -f"
+info "  $CTL_FILE restart"
+info "  $CTL_FILE ssh"
 echo

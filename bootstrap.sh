@@ -369,6 +369,7 @@ if ! gcloud compute ssh "$VM" $GCP_FLAGS --command "
   # Environment
   sudo mkdir -p /etc/brian &&
   sudo mv /tmp/brian.env /etc/brian/env &&
+  sudo chown brian:brian /etc/brian/env &&
   sudo chmod 600 /etc/brian/env &&
   source /etc/brian/env &&
 
@@ -408,7 +409,8 @@ if ! gcloud compute ssh "$VM" $GCP_FLAGS --command "
   sudo ln -sf \"\$FRAMEWORK_DIR/dist/cli/brian.js\" /usr/local/bin/brian &&
 
   # Scaffold + modules + service
-  sudo -u brian -E bash -c '
+  sudo -u brian bash -c '
+    source /etc/brian/env
     export BRIAN_APP_DIR=/home/brian/app
     export BRIAN_STATE_DIR=/home/brian/.brian
     export BRIAN_FRAMEWORK_DIR=/home/brian/brian

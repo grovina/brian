@@ -23,11 +23,11 @@ export const slackModule: Module = {
   async check(ctx) {
     const issues: string[] = [];
 
-    const mcpPath = path.join(ctx.appDir, "mcp", "slack.json");
+    const mcpPath = path.join(ctx.stateDir, "mcp", "slack.json");
     try {
       await fs.access(mcpPath);
     } catch {
-      issues.push("mcp/slack.json not found in app directory");
+      issues.push("mcp/slack.json not found");
     }
 
     if (!process.env.SLACK_TOKEN) issues.push("SLACK_TOKEN not set");
@@ -37,7 +37,7 @@ export const slackModule: Module = {
   },
 
   async install(ctx) {
-    const mcpDir = path.join(ctx.appDir, "mcp");
+    const mcpDir = path.join(ctx.stateDir, "mcp");
     await fs.mkdir(mcpDir, { recursive: true });
     await fs.writeFile(
       path.join(mcpDir, "slack.json"),

@@ -2,14 +2,11 @@ import { promisify } from "util";
 import { execFile } from "child_process";
 import fs from "fs/promises";
 import path from "path";
-import type { Module } from "../types.js";
+import type { Module, InstallContext } from "../types.js";
 
 const execFileAsync = promisify(execFile);
 
-async function runGit(
-  dir: string,
-  args: string[]
-): Promise<string> {
+async function runGit(dir: string, args: string[]): Promise<string> {
   const { stdout } = await execFileAsync("git", ["-C", dir, ...args], {
     timeout: 15_000,
   });
@@ -29,17 +26,17 @@ export const updaterModule: Module = {
     const issues: string[] = [];
 
     try {
-      await runGit(ctx.frameworkDir, ["rev-parse", "--is-inside-work-tree"]);
+      await runGit(ctx.repoDir, ["rev-parse", "--is-inside-work-tree"]);
     } catch {
-      issues.push(`Framework directory not a git repo: ${ctx.frameworkDir}`);
+      issues.push(`Not a git repo: ${ctx.repoDir}`);
       return { installed: false, issues };
     }
 
     try {
-      await runGit(ctx.frameworkDir, ["remote", "get-url", "upstream"]);
+      await runGit(ctx.repoDir, ["remote", "get-url", "upstream"]);
     } catch {
       try {
-        await runGit(ctx.frameworkDir, ["remote", "get-url", "origin"]);
+        await runGit(ctx.repoDir, ["remote", "get-url", "origin"]);
       } catch {
         issues.push("No upstream or origin remote found");
       }
@@ -50,10 +47,10 @@ export const updaterModule: Module = {
 
   async install(ctx) {
     try {
-      await runGit(ctx.frameworkDir, ["remote", "get-url", "upstream"]);
+      await runGit(ctx.repoDir, ["remote", "get-url", "upstream"]);
     } catch {
       try {
-        await runGit(ctx.frameworkDir, [
+        await runGit(ctx.repoDir, [
           "remote",
           "add",
           "upstream",
@@ -69,7 +66,7 @@ export const updaterModule: Module = {
 };
 
 export async function syncCheck(ctx: {
-  frameworkDir: string;
+  repoDir: string;
   stateDir: string;
 }): Promise<void> {
   const contextDir = path.join(ctx.stateDir, "context");
@@ -77,18 +74,18 @@ export async function syncCheck(ctx: {
   const statusFile = path.join(contextDir, "fork-status.md");
 
   try {
-    await runGit(ctx.frameworkDir, ["fetch", "--all", "--prune"]);
+    await runGit(ctx.repoDir, ["fetch", "--all", "--prune"]);
 
     let upstream = "upstream";
     try {
-      await runGit(ctx.frameworkDir, ["remote", "get-url", upstream]);
+      await runGit(ctx.repoDir, ["remote", "get-url", upstream]);
     } catch {
       upstream = "origin";
     }
 
     const branch = "main";
     const range = `origin/${branch}...${upstream}/${branch}`;
-    const counts = await runGit(ctx.frameworkDir, [
+    const counts = await runGit(ctx.repoDir, [
       "rev-list",
       "--left-right",
       "--count",

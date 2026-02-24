@@ -12,9 +12,8 @@ export interface CheckResult {
 }
 
 export interface InstallContext {
-  appDir: string;
+  repoDir: string;
   stateDir: string;
-  frameworkDir: string;
 }
 
 export interface Module {

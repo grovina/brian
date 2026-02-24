@@ -22,11 +22,11 @@ export const githubModule: Module = {
   async check(ctx) {
     const issues: string[] = [];
 
-    const mcpPath = path.join(ctx.appDir, "mcp", "github.json");
+    const mcpPath = path.join(ctx.stateDir, "mcp", "github.json");
     try {
       await fs.access(mcpPath);
     } catch {
-      issues.push("mcp/github.json not found in app directory");
+      issues.push("mcp/github.json not found");
     }
 
     if (!process.env.GITHUB_TOKEN) issues.push("GITHUB_TOKEN not set");
@@ -35,7 +35,7 @@ export const githubModule: Module = {
   },
 
   async install(ctx) {
-    const mcpDir = path.join(ctx.appDir, "mcp");
+    const mcpDir = path.join(ctx.stateDir, "mcp");
     await fs.mkdir(mcpDir, { recursive: true });
     await fs.writeFile(
       path.join(mcpDir, "github.json"),

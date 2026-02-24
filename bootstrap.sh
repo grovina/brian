@@ -408,14 +408,13 @@ if ! gcloud compute ssh "$VM" $GCP_FLAGS --command "
   # Install brian CLI
   sudo ln -sf \"\$FRAMEWORK_DIR/dist/cli/brian.js\" /usr/local/bin/brian &&
 
-  # Scaffold + modules + service
+  # Initialize + modules + service
   sudo -u brian bash -c '
     set -a
     source /etc/brian/env
     set +a
-    export BRIAN_APP_DIR=/home/brian/app
+    export BRIAN_REPO_DIR=/home/brian/brian
     export BRIAN_STATE_DIR=/home/brian/.brian
-    export BRIAN_FRAMEWORK_DIR=/home/brian/brian
     brian setup
   '
 " < /dev/null 2>&1 | sed 's/^/    /'; then

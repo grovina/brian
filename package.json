@@ -36,7 +36,7 @@
   },
   "scripts": {
     "build": "tsc && chmod +x dist/cli/brian.js",
-    "prepare": "tsc",
+    "start": "node --env-file=.env dist/start.js",
     "typecheck": "tsc --noEmit"
   },
   "engines": {

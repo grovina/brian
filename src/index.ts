@@ -19,4 +19,4 @@ export {
   type AutonomousWakeConfig,
 } from "./wake/autonomous.js";
 
-export { bash, selfDeploy } from "./tools/index.js";
+export { bash } from "./tools/index.js";

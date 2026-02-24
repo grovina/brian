@@ -13,10 +13,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 function resolveContext(): InstallContext {
   const home = process.env.HOME ?? "/home/brian";
   return {
-    appDir: process.env.BRIAN_APP_DIR ?? resolve(home, "app"),
+    repoDir: process.env.BRIAN_REPO_DIR ?? resolve(__dirname, "../.."),
     stateDir: process.env.BRIAN_STATE_DIR ?? resolve(home, ".brian"),
-    frameworkDir:
-      process.env.BRIAN_FRAMEWORK_DIR ?? resolve(__dirname, "../.."),
   };
 }
 
@@ -24,7 +22,8 @@ function printUsage(): void {
   console.log(`brian — manage your brian instance
 
 Commands:
-  setup                       Scaffold app, install modules, start daemon
+  setup                       Initialize state, install modules, start daemon
+  deploy                      Pull, build, restart (with rollback)
   module list                 List available modules
   module install <name>       Install a module
   module check [name]         Check module status
@@ -46,27 +45,48 @@ async function handleSetup(): Promise<void> {
   }
 
   const ctx = resolveContext();
-  const brianDep = `file:${ctx.frameworkDir}`;
+  const org = process.env.GITHUB_ORG ?? "";
 
-  if (await isDirectory(resolve(ctx.appDir, ".git"))) {
-    console.log("Updating existing project...");
-    execSync(`git -C ${ctx.appDir} fetch origin main -q`, { stdio: "inherit" });
-    execSync(`git -C ${ctx.appDir} reset --hard origin/main -q`, {
-      stdio: "inherit",
-    });
-  } else {
-    console.log("Scaffolding project...");
-    await scaffoldProject(ctx.appDir, brianDep, name);
+  console.log("Initializing state directory...");
+  await fs.mkdir(resolve(ctx.stateDir, "mcp"), { recursive: true });
+  await fs.mkdir(resolve(ctx.stateDir, "context"), { recursive: true });
 
-    if (process.env.GITHUB_TOKEN && process.env.GITHUB_ORG) {
-      await createGitHubRepo(ctx.appDir, name);
+  const instructionsPath = resolve(ctx.stateDir, "instructions.md");
+  try {
+    await fs.access(instructionsPath);
+  } catch {
+    let instructions = `## First Run
+
+This is your first deployment. Introduce yourself on Slack, explain what you
+can do, and ask the team what they need. Once you've done that, remove this
+section and commit the change.
+`;
+
+    if (org) {
+      instructions += `
+## About
+
+You're built on the brian framework. Your org has a fork at
+github.com/${org}/brian (upstream: github.com/grovina/brian).
+
+When you identify improvements that would benefit all brians, push changes
+to your fork and open a PR to upstream.
+`;
     }
-  }
 
-  console.log("Building...");
-  execSync(`cd ${ctx.appDir} && npm install --silent ${brianDep} && npm run build --silent`, {
-    stdio: "inherit",
-  });
+    instructions += `
+## Managing Capabilities
+
+Use the \`brian\` CLI to manage your modules and integrations:
+
+  brian module list          — see available modules
+  brian module install X     — install a module
+  brian doctor               — check health
+  brian sync                 — sync fork with upstream
+`;
+
+    await fs.writeFile(instructionsPath, instructions);
+  }
 
   console.log("Installing default modules...");
   for (const mod of registry.filter((m) => m.meta.default)) {
@@ -78,223 +98,14 @@ async function handleSetup(): Promise<void> {
     }
   }
 
-  await installService(name, ctx.appDir);
+  await installService(name, ctx.repoDir);
 
   console.log(`\n${name} is running!`);
 }
 
-async function scaffoldProject(
-  appDir: string,
-  brianDep: string,
-  name: string
-): Promise<void> {
-  await fs.mkdir(resolve(appDir, "src"), { recursive: true });
-  await fs.mkdir(resolve(appDir, "mcp"), { recursive: true });
-  await fs.mkdir(resolve(appDir, "setup"), { recursive: true });
-
-  const provider = process.env.MODEL_PROVIDER ?? "vertex-ai";
-  const org = process.env.GITHUB_ORG ?? "";
-
-  const modelSdkDep =
-    provider === "vertex-ai"
-      ? '"@google/genai": "^1.42.0"'
-      : '"@anthropic-ai/sdk": "^0.78.0"';
-
-  await fs.writeFile(
-    resolve(appDir, "package.json"),
-    JSON.stringify(
-      {
-        name,
-        version: "0.1.0",
-        private: true,
-        type: "module",
-        main: "dist/main.js",
-        scripts: {
-          build: "tsc",
-          start: "node --env-file=.env dist/main.js",
-          dev: "tsx --env-file=.env src/main.ts",
-          typecheck: "tsc --noEmit",
-        },
-        engines: { node: ">=22" },
-        dependencies: {
-          brian: brianDep,
-          ...(provider === "vertex-ai"
-            ? { "@google/genai": "^1.42.0" }
-            : { "@anthropic-ai/sdk": "^0.78.0" }),
-        },
-        devDependencies: {
-          "@types/node": "^22.0.0",
-          tsx: "^4.21.0",
-          typescript: "^5.9.3",
-        },
-      },
-      null,
-      2
-    ) + "\n"
-  );
-
-  await fs.writeFile(
-    resolve(appDir, "tsconfig.json"),
-    JSON.stringify(
-      {
-        compilerOptions: {
-          target: "ES2024",
-          module: "NodeNext",
-          moduleResolution: "NodeNext",
-          outDir: "dist",
-          rootDir: "src",
-          strict: true,
-          esModuleInterop: true,
-          skipLibCheck: true,
-          forceConsistentCasingInFileNames: true,
-        },
-        include: ["src/**/*"],
-        exclude: ["node_modules", "dist"],
-      },
-      null,
-      2
-    ) + "\n"
-  );
-
-  const modelImport =
-    provider === "vertex-ai"
-      ? `import { VertexAIModel } from 'brian/models/vertex-ai';\n`
-      : `import { AnthropicModel } from 'brian/models/anthropic';\n`;
-
-  const modelConfig =
-    provider === "vertex-ai"
-      ? `  model: new VertexAIModel({
-    project: process.env.GCP_PROJECT!,
-    region: process.env.VERTEX_AI_LOCATION,
-  }),`
-      : `  model: new AnthropicModel({
-    apiKey: process.env.ANTHROPIC_API_KEY,
-  }),`;
-
-  await fs.writeFile(
-    resolve(appDir, "src/main.ts"),
-    `import { Brian, AutonomousWake, bash, selfDeploy } from 'brian';
-${modelImport}
-const brian = new Brian({
-  name: process.env.BRIAN_NAME || '${name}',
-
-${modelConfig}
-
-  wake: new AutonomousWake(),
-
-  tools: [bash, selfDeploy()],
-
-  mcp: './mcp/',
-  instructions: './instructions.md',
-});
-
-await brian.start();
-`
-  );
-
-  let instructions = `## First Run
-
-This is your first deployment. Introduce yourself on Slack, explain what you
-can do, and ask the team what they need. Once you've done that, remove this
-section and commit the change.
-`;
-
-  if (org) {
-    instructions += `
-## About
-
-You're built on the brian framework. Your org has a fork at
-github.com/${org}/brian (upstream: github.com/grovina/brian).
-
-When you identify improvements that would benefit all brians, make changes
-in the fork and open a PR to upstream.
-`;
-  }
-
-  instructions += `
-## Managing Capabilities
-
-Use the \`brian\` CLI to manage your modules and integrations:
-
-  brian module list          — see available modules
-  brian module install X     — install a module
-  brian doctor               — check health
-  brian sync                 — sync fork with upstream
-`;
-
-  await fs.writeFile(resolve(appDir, "instructions.md"), instructions);
-
-  await fs.writeFile(
-    resolve(appDir, ".gitignore"),
-    "node_modules/\ndist/\n.env\n"
-  );
-
-  await fs.writeFile(
-    resolve(appDir, "setup/deploy-self.sh"),
-    `#!/bin/bash
-set -e
-cd "$(dirname "$0")/.."
-PREVIOUS=$(git rev-parse HEAD)
-git pull origin main
-npm install
-npm run build
-sudo systemctl restart brian
-sleep 20
-if ! systemctl is-active --quiet brian; then
-  echo "New version failed, rolling back to $PREVIOUS"
-  git checkout "$PREVIOUS"
-  npm install
-  npm run build
-  sudo systemctl restart brian
-fi
-`
-  );
-  await fs.chmod(resolve(appDir, "setup/deploy-self.sh"), 0o755);
-}
-
-async function createGitHubRepo(
-  appDir: string,
-  name: string
-): Promise<void> {
-  const org = process.env.GITHUB_ORG!;
-  const token = process.env.GITHUB_TOKEN!;
-
-  console.log("Creating GitHub repo...");
-  try {
-    const res = await fetch(
-      `https://api.github.com/repos/${org}/${name}`,
-      { headers: { Authorization: `token ${token}` } }
-    );
-    if (res.status !== 200) {
-      await fetch(`https://api.github.com/orgs/${org}/repos`, {
-        method: "POST",
-        headers: {
-          Authorization: `token ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ name, private: true }),
-      });
-    }
-
-    execSync(
-      [
-        `cd ${appDir}`,
-        "git init -q",
-        "git add -A",
-        `git commit -q -m 'initial ${name}'`,
-        `git remote add origin https://github.com/${org}/${name}.git 2>/dev/null || true`,
-        "git push -u origin main -q 2>/dev/null || git push -u origin main --force-with-lease -q 2>/dev/null",
-      ].join(" && "),
-      { stdio: "inherit" }
-    );
-  } catch (err) {
-    console.error("GitHub repo creation failed:", err);
-  }
-}
-
 async function installService(
   name: string,
-  appDir: string
+  repoDir: string
 ): Promise<void> {
   const unit = `[Unit]
 Description=${name}
@@ -303,9 +114,9 @@ After=network.target
 [Service]
 Type=simple
 User=brian
-WorkingDirectory=${appDir}
+WorkingDirectory=${repoDir}
 EnvironmentFile=/etc/brian/env
-ExecStart=/usr/bin/node dist/main.js
+ExecStart=/usr/bin/node dist/start.js
 Restart=on-failure
 RestartSec=5
 StartLimitBurst=5
@@ -337,16 +148,8 @@ WantedBy=multi-user.target
     }
   } catch {
     console.log(
-      "Systemd not available — start manually: node dist/main.js"
+      "Systemd not available — start manually: node dist/start.js"
     );
-  }
-}
-
-async function isDirectory(p: string): Promise<boolean> {
-  try {
-    return (await fs.stat(p)).isDirectory();
-  } catch {
-    return false;
   }
 }
 
@@ -433,8 +236,36 @@ async function handleModuleCheck(name?: string): Promise<void> {
 }
 
 // ─────────────────────────────────────────────────
-// doctor / sync
+// deploy / doctor / sync
 // ─────────────────────────────────────────────────
+
+async function handleDeploy(): Promise<void> {
+  const ctx = resolveContext();
+
+  console.log("Pulling latest...");
+  execSync(`git -C ${ctx.repoDir} pull origin main`, { stdio: "inherit" });
+
+  console.log("Installing dependencies...");
+  execSync(`cd ${ctx.repoDir} && npm install`, { stdio: "inherit" });
+
+  console.log("Building...");
+  execSync(`cd ${ctx.repoDir} && npm run build`, { stdio: "inherit" });
+
+  console.log("Restarting...");
+  try {
+    execSync("sudo systemctl restart brian", { stdio: "inherit" });
+    await new Promise((r) => setTimeout(r, 10_000));
+    execSync("systemctl is-active --quiet brian");
+    console.log("✓ Deployed and running");
+  } catch {
+    console.error("✗ Failed to restart. Rolling back...");
+    execSync(`git -C ${ctx.repoDir} checkout HEAD~1`, { stdio: "inherit" });
+    execSync(`cd ${ctx.repoDir} && npm install && npm run build`, { stdio: "inherit" });
+    execSync("sudo systemctl restart brian", { stdio: "inherit" });
+    console.error("Rolled back to previous version.");
+    process.exit(1);
+  }
+}
 
 async function handleDoctor(): Promise<void> {
   console.log("Running health checks...\n");
@@ -446,34 +277,28 @@ async function handleSync(args: string[]): Promise<void> {
 
   if (args.includes("--check")) {
     console.log("Checking fork status...");
-    await syncCheck({
-      frameworkDir: ctx.frameworkDir,
-      stateDir: ctx.stateDir,
-    });
+    await syncCheck(ctx);
     console.log("✓ Status written to context/fork-status.md");
     return;
   }
 
   console.log("Syncing fork with upstream...");
   try {
-    execFileSync("git", ["-C", ctx.frameworkDir, "fetch", "upstream"], {
+    execFileSync("git", ["-C", ctx.repoDir, "fetch", "upstream"], {
       stdio: "inherit",
     });
     execFileSync(
       "git",
-      ["-C", ctx.frameworkDir, "merge", "upstream/main", "--ff-only"],
+      ["-C", ctx.repoDir, "merge", "upstream/main", "--ff-only"],
       { stdio: "inherit" }
     );
     console.log("✓ Fork synced");
 
-    await syncCheck({
-      frameworkDir: ctx.frameworkDir,
-      stateDir: ctx.stateDir,
-    });
+    await syncCheck(ctx);
   } catch {
     console.error(
       "✗ Sync failed — may need manual merge. Try: git -C " +
-        ctx.frameworkDir +
+        ctx.repoDir +
         " merge upstream/main"
     );
     process.exit(1);
@@ -490,6 +315,9 @@ async function main(): Promise<void> {
   switch (command) {
     case "setup":
       await handleSetup();
+      break;
+    case "deploy":
+      await handleDeploy();
       break;
     case "module":
       switch (subcommand) {

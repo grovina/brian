@@ -64,7 +64,7 @@ export interface BrianConfig {
   name: string;
   model: ModelProvider;
   wake: WakeStrategy;
-  tools?: (Tool | Tool[])[];
+  tools?: Tool[];
   mcp?: string | string[];
   instructions?: string;
   stateDir?: string;

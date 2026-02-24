@@ -81,6 +81,7 @@ Use the \`brian\` CLI to manage your modules and integrations:
 
   brian module list          — see available modules
   brian module install X     — install a module
+  brian deploy               — pull, build, restart
   brian doctor               — check health
   brian sync                 — sync fork with upstream
 `;
@@ -110,6 +111,8 @@ async function installService(
   const unit = `[Unit]
 Description=${name}
 After=network.target
+StartLimitBurst=5
+StartLimitIntervalSec=60
 
 [Service]
 Type=simple
@@ -119,8 +122,6 @@ EnvironmentFile=/etc/brian/env
 ExecStart=/usr/bin/node dist/start.js
 Restart=on-failure
 RestartSec=5
-StartLimitBurst=5
-StartLimitIntervalSec=60
 
 [Install]
 WantedBy=multi-user.target

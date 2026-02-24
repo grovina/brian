@@ -3,34 +3,6 @@
   "version": "0.1.0",
   "description": "Framework for autonomous AI coworkers",
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    },
-    "./models/*": {
-      "types": "./dist/models/*.d.ts",
-      "import": "./dist/models/*.js"
-    },
-    "./tools": {
-      "types": "./dist/tools/index.d.ts",
-      "import": "./dist/tools/index.js"
-    },
-    "./tools/*": {
-      "types": "./dist/tools/*.d.ts",
-      "import": "./dist/tools/*.js"
-    },
-    "./wake": {
-      "types": "./dist/wake/index.d.ts",
-      "import": "./dist/wake/index.js"
-    },
-    "./wake/*": {
-      "types": "./dist/wake/*.d.ts",
-      "import": "./dist/wake/*.js"
-    }
-  },
   "bin": {
     "brian": "./dist/cli/brian.js"
   },
@@ -43,19 +15,11 @@
     "node": ">=22"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.26.0"
-  },
-  "peerDependencies": {
-    "@google/genai": ">=1.0.0",
-    "@anthropic-ai/sdk": ">=0.30.0"
-  },
-  "peerDependenciesMeta": {
-    "@google/genai": { "optional": true },
-    "@anthropic-ai/sdk": { "optional": true }
-  },
-  "devDependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
     "@google/genai": "^1.42.0",
+    "@modelcontextprotocol/sdk": "^1.26.0"
+  },
+  "devDependencies": {
     "@types/node": "^25.2.3",
     "typescript": "^5.9.3"
   }

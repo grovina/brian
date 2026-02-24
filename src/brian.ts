@@ -54,22 +54,11 @@ export class Brian {
   }
 
   private resolveTools(): Tool[] {
-    const tools: Tool[] = [];
-
-    tools.push(...memoryTools(this.stateDir));
-    tools.push(...(this.config.wake.tools?.() ?? []));
-
-    if (this.config.tools) {
-      for (const entry of this.config.tools) {
-        if (Array.isArray(entry)) {
-          tools.push(...entry);
-        } else {
-          tools.push(entry);
-        }
-      }
-    }
-
-    return tools;
+    return [
+      ...memoryTools(this.stateDir),
+      ...(this.config.wake.tools?.() ?? []),
+      ...(this.config.tools ?? []),
+    ];
   }
 
   private async loadMCP(): Promise<void> {

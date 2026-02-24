@@ -395,18 +395,18 @@ if ! gcloud compute ssh "$VM" $GCP_FLAGS --command "
     sudo chmod 600 /home/brian/.git-credentials
   fi &&
 
-  # Framework
-  FRAMEWORK_DIR=/home/brian/brian &&
-  if [ -d \"\$FRAMEWORK_DIR/.git\" ]; then
-    sudo -u brian git -C \"\$FRAMEWORK_DIR\" fetch origin main -q &&
-    sudo -u brian git -C \"\$FRAMEWORK_DIR\" reset --hard origin/main -q
+  # Clone/update repo
+  REPO_DIR=/home/brian/brian &&
+  if [ -d \"\$REPO_DIR/.git\" ]; then
+    sudo -u brian git -C \"\$REPO_DIR\" fetch origin main -q &&
+    sudo -u brian git -C \"\$REPO_DIR\" reset --hard origin/main -q
   else
-    sudo -u brian git clone -q \"https://github.com/${BRIAN_REPO}.git\" \"\$FRAMEWORK_DIR\"
+    sudo -u brian git clone -q \"https://github.com/${BRIAN_REPO}.git\" \"\$REPO_DIR\"
   fi &&
-  sudo -u brian bash -c \"cd \$FRAMEWORK_DIR && npm install --silent && npm run build --silent\" &&
+  sudo -u brian bash -c \"cd \$REPO_DIR && npm install --silent && npm run build --silent\" &&
 
   # Install brian CLI
-  sudo ln -sf \"\$FRAMEWORK_DIR/dist/cli/brian.js\" /usr/local/bin/brian &&
+  sudo ln -sf \"\$REPO_DIR/dist/cli/brian.js\" /usr/local/bin/brian &&
 
   # Initialize + modules + service
   sudo -u brian bash -c '

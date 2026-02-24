@@ -23,7 +23,7 @@ function printUsage(): void {
 
 Commands:
   setup                       Initialize state, install modules, start daemon
-  deploy                      Pull, build, restart (with rollback)
+  redeploy                    Pull, build, restart (with rollback)
   module list                 List available modules
   module install <name>       Install a module
   module check [name]         Check module status
@@ -81,7 +81,7 @@ Use the \`brian\` CLI to manage your modules and integrations:
 
   brian module list          — see available modules
   brian module install X     — install a module
-  brian deploy               — pull, build, restart
+  brian redeploy             — pull, build, restart
   brian doctor               — check health
   brian sync                 — sync fork with upstream
 `;
@@ -237,10 +237,10 @@ async function handleModuleCheck(name?: string): Promise<void> {
 }
 
 // ─────────────────────────────────────────────────
-// deploy / doctor / sync
+// redeploy / doctor / sync
 // ─────────────────────────────────────────────────
 
-async function handleDeploy(): Promise<void> {
+async function handleRedeploy(): Promise<void> {
   const ctx = resolveContext();
 
   console.log("Pulling latest...");
@@ -317,8 +317,8 @@ async function main(): Promise<void> {
     case "setup":
       await handleSetup();
       break;
-    case "deploy":
-      await handleDeploy();
+    case "redeploy":
+      await handleRedeploy();
       break;
     case "module":
       switch (subcommand) {

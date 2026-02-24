@@ -51,7 +51,7 @@ A brian built on this framework is a long-running process that:
 - **Acts autonomously** — uses tools (bash, MCP servers, memory) to get work done
 - **Controls its own schedule** — decides when to wake up next based on context
 - **Remembers across restarts** — persistent memory, auto-compacted conversation, activity logs
-- **Improves itself** — can modify its own code, open PRs, and self-deploy
+- **Improves itself** — can modify its own code, open PRs, and redeploy itself
 
 ## Core Concepts
 
@@ -89,7 +89,7 @@ Modules are managed via the `brian` CLI:
 brian module list              # see available modules
 brian module install slack     # install a module
 brian module check             # check all module status
-brian deploy                   # pull, build, restart (with rollback)
+brian redeploy                 # pull, build, restart (with rollback)
 brian doctor                   # full health check
 brian sync                     # sync fork with upstream
 brian sync --check             # check fork status only

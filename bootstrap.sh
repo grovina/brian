@@ -269,6 +269,7 @@ usage() {
 Usage:
   ctl status
   ctl logs
+  ctl redeploy
   ctl restart
   ctl ssh
 USAGE
@@ -281,6 +282,9 @@ case "\$cmd" in
     ;;
   logs)
     gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "journalctl -u brian -n 200 -f --no-pager" < /dev/null
+    ;;
+  redeploy)
+    gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "sudo -u brian -H brian redeploy" < /dev/null
     ;;
   restart)
     gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "sudo systemctl restart brian && systemctl is-active brian" < /dev/null
@@ -449,6 +453,7 @@ echo
 info "$(dim "day-2 commands (from your machine):")"
 info "  $CTL_FILE status"
 info "  $CTL_FILE logs"
+info "  $CTL_FILE redeploy"
 info "  $CTL_FILE restart"
 info "  $CTL_FILE ssh"
 echo

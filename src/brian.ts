@@ -6,12 +6,14 @@ import { Agent } from "./agent.js";
 import { MCPManager } from "./mcp.js";
 import { memoryTools } from "./memory.js";
 import { initLogger } from "./logger.js";
+import { Extension, extensionsRegistry } from "./extensions/index.js";
 
 export class Brian {
   private config: BrianConfig;
   private stateDir: string;
   private mcp: MCPManager;
   private agent!: Agent;
+  private activeExtensions: Extension[] = [];
 
   constructor(config: BrianConfig) {
     this.config = config;
@@ -24,6 +26,16 @@ export class Brian {
     initLogger(this.stateDir);
 
     console.log(`${this.config.name} starting up...`);
+
+    await this.resolveExtensions();
+    
+    // Run extension setups
+    for (const ext of this.activeExtensions) {
+      if (ext.setup) {
+        console.log(`[Extension] Setting up ${ext.name}...`);
+        await ext.setup();
+      }
+    }
 
     await this.loadMCP();
 
@@ -52,11 +64,35 @@ export class Brian {
     await this.config.wake.start(() => this.agent.run());
   }
 
+  private async resolveExtensions(): Promise<void> {
+    if (!this.config.extensions) return;
+
+    for (const entry of this.config.extensions) {
+      if (typeof entry === "string") {
+        const ext = extensionsRegistry.get(entry);
+        if (ext) {
+          this.activeExtensions.push(ext);
+        } else {
+          console.warn(`[Extension] Unknown extension: ${entry}`);
+        }
+      } else {
+        this.activeExtensions.push(entry);
+      }
+    }
+  }
+
   private resolveTools(): Tool[] {
     const tools: Tool[] = [];
 
     tools.push(...memoryTools(this.stateDir));
     tools.push(...(this.config.wake.tools?.() ?? []));
+
+    // Extension tools
+    for (const ext of this.activeExtensions) {
+      if (ext.tools) {
+        tools.push(...ext.tools);
+      }
+    }
 
     // User-provided tools (flatten nested arrays)
     if (this.config.tools) {
@@ -73,6 +109,15 @@ export class Brian {
   }
 
   private async loadMCP(): Promise<void> {
+    // Load MCP servers from extensions
+    for (const ext of this.activeExtensions) {
+      if (ext.mcpServers) {
+        for (const server of ext.mcpServers) {
+          await this.mcp.addServer(server);
+        }
+      }
+    }
+
     if (!this.config.mcp) return;
 
     const paths = Array.isArray(this.config.mcp)

@@ -1,3 +1,5 @@
+import type { Extension } from "./extensions/index.js";
+
 export interface ImageData {
   mimeType: string;
   data: string;
@@ -66,6 +68,7 @@ export interface BrianConfig {
   wake: WakeStrategy;
   tools?: (Tool | Tool[])[];
   mcp?: string | string[];
+  extensions?: (string | Extension)[];
   instructions?: string;
   stateDir?: string;
 }

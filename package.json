@@ -35,7 +35,7 @@
     "brian": "./dist/cli/brian.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && chmod +x dist/cli/brian.js",
     "prepare": "tsc",
     "typecheck": "tsc --noEmit"
   },

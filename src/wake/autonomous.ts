@@ -18,21 +18,21 @@ export class AutonomousWake implements WakeStrategy {
   tools(): Tool[] {
     return [
       {
-        name: "done",
+        name: "sleep_until",
         definition: {
-          name: "done",
+          name: "sleep_until",
           description:
-            "End this wake cycle and set when to wake up next based on what's happening, time of day, pending tasks, etc.",
+            "End this wake cycle and schedule the next wake time in minutes based on current priorities, pending work, and expected updates.",
           parameters: {
             type: "object",
             properties: {
               minutes: {
                 type: "number",
-                description: "Minutes until next wake",
+                description: "Minutes to sleep before the next wake cycle",
               },
               reason: {
                 type: "string",
-                description: "Why this interval",
+                description: "Why this sleep interval is appropriate right now",
               },
             },
             required: ["minutes"],
@@ -52,7 +52,7 @@ export class AutonomousWake implements WakeStrategy {
   }
 
   promptSection(): string {
-    return "Call done(minutes) when you're finished to set when you'll wake up next. Consider time of day, pending work, expected responses, and anything else relevant to decide the interval.";
+    return "Call sleep_until(minutes) to end the current wake cycle and schedule the next one. Choose an interval that matches urgency, pending work, expected responses, and time of day.";
   }
 
   async start(handler: () => Promise<void>): Promise<void> {

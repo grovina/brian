@@ -95,7 +95,7 @@ import { AnthropicModel } from 'brian/models/anthropic';
 
 Implement `WakeStrategy` to control when brian wakes up. Strategies can inject their own tools and prompt sections. The catalog ships with:
 
-- **`brian/wake/autonomous`** — `AutonomousWake` — the model decides when to wake up next via a `done` tool
+- **`brian/wake/autonomous`** — `AutonomousWake` — the model decides when to wake up next via a `sleep_until` tool
 
 ### Tools
 

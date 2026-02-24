@@ -261,7 +261,7 @@ usage() {
   cat <<'USAGE'
 Usage:
   ctl status
-  ctl logs [-f]
+  ctl logs
   ctl restart
   ctl ssh
 USAGE
@@ -273,11 +273,7 @@ case "\$cmd" in
     gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "systemctl is-active brian" < /dev/null
     ;;
   logs)
-    if [[ "\${2:-}" == "-f" ]]; then
-      gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "journalctl -u brian -f --no-pager" < /dev/null
-    else
-      gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "journalctl -u brian -n 100 --no-pager" < /dev/null
-    fi
+    gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "journalctl -u brian -f --no-pager" < /dev/null
     ;;
   restart)
     gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "sudo systemctl restart brian && systemctl is-active brian" < /dev/null
@@ -406,7 +402,6 @@ echo
 info "$(dim "day-2 commands (from your machine):")"
 info "  $CTL_FILE status"
 info "  $CTL_FILE logs"
-info "  $CTL_FILE logs -f"
 info "  $CTL_FILE restart"
 info "  $CTL_FILE ssh"
 echo

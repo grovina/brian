@@ -50,6 +50,9 @@ cmd_setup() {
   fi
   sudo -u brian bash -c "cd $FRAMEWORK_DIR && npm install --silent && npm run build --silent"
 
+  echo "Installing brian CLI..."
+  sudo ln -sf "$FRAMEWORK_DIR/dist/cli/brian.js" /usr/local/bin/brian
+
   if [[ -d "$APP_DIR/.git" ]]; then
     echo "Updating existing project..."
     sudo -u brian git -C "$APP_DIR" fetch origin main -q
@@ -86,6 +89,16 @@ cmd_setup() {
 
   echo "Building..."
   sudo -u brian bash -c "cd $APP_DIR && npm install --silent file:$FRAMEWORK_DIR && npm run build --silent"
+
+  echo "Installing default modules..."
+  sudo -u brian bash -c "
+    export BRIAN_APP_DIR=$APP_DIR
+    export BRIAN_STATE_DIR=/home/brian/.brian
+    export BRIAN_FRAMEWORK_DIR=$FRAMEWORK_DIR
+    brian module install slack
+    brian module install github
+    brian module install updater
+  "
 
   echo "Installing systemd service..."
   sudo tee /etc/systemd/system/brian.service > /dev/null << EOF
@@ -241,6 +254,15 @@ github.com/${GITHUB_ORG}/brian (upstream: github.com/grovina/brian).
 
 When you identify improvements that would benefit all brians, make changes
 in the fork and open a PR to upstream.
+
+## Managing Capabilities
+
+Use the \`brian\` CLI to manage your modules and integrations:
+
+  brian module list          — see available modules
+  brian module install X     — install a module
+  brian doctor               — check health
+  brian sync                 — sync fork with upstream
 INSTRUCTIONS
   else
     sudo -u brian tee "$app_dir/instructions.md" > /dev/null << 'INSTRUCTIONS'
@@ -249,26 +271,17 @@ INSTRUCTIONS
 This is your first deployment. Introduce yourself on Slack, explain what you
 can do, and ask the team what they need. Once you've done that, remove this
 section and commit the change.
+
+## Managing Capabilities
+
+Use the `brian` CLI to manage your modules and integrations:
+
+  brian module list          — see available modules
+  brian module install X     — install a module
+  brian doctor               — check health
+  brian sync                 — sync fork with upstream
 INSTRUCTIONS
   fi
-
-  sudo -u brian tee "$app_dir/mcp/slack.json" > /dev/null << 'MCP'
-{
-  "name": "slack",
-  "command": "npx",
-  "args": ["-y", "@modelcontextprotocol/server-slack"],
-  "env": { "SLACK_BOT_TOKEN": "${SLACK_TOKEN}", "SLACK_TEAM_ID": "${SLACK_TEAM_ID}" }
-}
-MCP
-
-  sudo -u brian tee "$app_dir/mcp/github.json" > /dev/null << 'MCP'
-{
-  "name": "github",
-  "command": "npx",
-  "args": ["-y", "@modelcontextprotocol/server-github"],
-  "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}" }
-}
-MCP
 
   sudo -u brian tee "$app_dir/.gitignore" > /dev/null << 'GI'
 node_modules/

@@ -2,6 +2,7 @@ import path from "path";
 import { homedir } from "os";
 import fs from "fs/promises";
 import type { BrianConfig, Tool } from "./types.js";
+import type { MCPServerConfig } from "./mcp.js";
 import { Agent } from "./agent.js";
 import { MCPManager } from "./mcp.js";
 import { memoryTools } from "./memory.js";
@@ -58,7 +59,6 @@ export class Brian {
     tools.push(...memoryTools(this.stateDir));
     tools.push(...(this.config.wake.tools?.() ?? []));
 
-    // User-provided tools (flatten nested arrays)
     if (this.config.tools) {
       for (const entry of this.config.tools) {
         if (Array.isArray(entry)) {
@@ -87,13 +87,19 @@ export class Brian {
         await this.mcp.loadDirectory(resolved);
       } else if (stat?.isFile() && resolved.endsWith(".json")) {
         const data = await fs.readFile(resolved, "utf-8");
-        const config = JSON.parse(data);
-        if (config.servers && Array.isArray(config.servers)) {
-          for (const server of config.servers) {
+        const parsed = JSON.parse(data) as unknown;
+        if (
+          parsed &&
+          typeof parsed === "object" &&
+          "servers" in parsed &&
+          Array.isArray((parsed as { servers: unknown }).servers)
+        ) {
+          for (const server of (parsed as { servers: MCPServerConfig[] })
+            .servers) {
             await this.mcp.addServer(server);
           }
         } else {
-          await this.mcp.addServer(config);
+          await this.mcp.addServer(parsed as MCPServerConfig);
         }
       }
     }

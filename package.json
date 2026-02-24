@@ -31,6 +31,9 @@
       "import": "./dist/wake/*.js"
     }
   },
+  "bin": {
+    "brian": "./dist/cli/brian.js"
+  },
   "scripts": {
     "build": "tsc",
     "prepare": "tsc",

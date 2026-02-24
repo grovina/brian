@@ -1,6 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import type { ToolDefinition, Tool, ToolResult } from "./types.js";
+import type { ToolDefinition } from "./types.js";
 import { homedir } from "os";
 import path from "path";
 import fs from "fs/promises";

@@ -1,5 +1,31 @@
 import fs from "fs/promises";
+import path from "path";
 import { Memory } from "./memory.js";
+
+async function readContextDir(stateDir: string): Promise<string[]> {
+  const contextDir = path.join(stateDir, "context");
+  let files: string[];
+  try {
+    files = await fs.readdir(contextDir);
+  } catch {
+    return [];
+  }
+
+  const sections: string[] = [];
+  for (const file of files.sort()) {
+    try {
+      const content = await fs.readFile(
+        path.join(contextDir, file),
+        "utf-8"
+      );
+      const trimmed = content.trim();
+      if (trimmed) sections.push(trimmed);
+    } catch {
+      // skip unreadable files
+    }
+  }
+  return sections;
+}
 
 export async function buildSystemPrompt(params: {
   name: string;
@@ -18,6 +44,8 @@ export async function buildSystemPrompt(params: {
       // instructions file doesn't exist yet — that's fine
     }
   }
+
+  const contextSections = await readContextDir(params.stateDir);
 
   const sections = [
     `You are ${params.name}, an autonomous AI coworker.
@@ -52,6 +80,7 @@ Your git author name is "${params.name}".`,
 
     memoryContent ? `## Memory\n\n${memoryContent}` : null,
     ...(params.extraSections ?? []),
+    ...contextSections,
   ];
 
   return sections.filter(Boolean).join("\n\n");

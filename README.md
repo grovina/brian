@@ -40,31 +40,34 @@ await brian.start();
 
 ## Architecture
 
-The repo has two parts: the **core framework** (flat files in `src/`) and the **catalog** of pluggable modules (directories in `src/`).
+The repo has three parts: the **core runtime** (`src/`), the **module catalog** (`src/modules/`), and the **brian CLI** (`src/cli/`).
 
-```
+```text
 src/
 ├── index.ts              # Public API
 ├── brian.ts              # Brian class — orchestrates everything
 ├── types.ts              # Core interfaces
 ├── agent.ts              # Model-agnostic agent loop
-├── prompt.ts             # System prompt builder
+├── prompt.ts             # System prompt builder (reads context/)
 ├── memory.ts             # State: memory.md, conversation, logs
 ├── mcp.ts                # MCP server manager
 ├── logger.ts             # File + console logging
-├── models/               # Model providers (catalog)
+├── models/               # Model providers
 │   ├── vertex-ai.ts      # Google Vertex AI (Gemini)
 │   └── anthropic.ts      # Anthropic (Claude)
-├── tools/                # Tools (catalog)
+├── tools/                # Built-in tools
 │   ├── bash.ts           # Shell execution
 │   └── self-deploy.ts    # Self-deployment trigger
-└── wake/                 # Wake strategies (catalog)
-    └── autonomous.ts     # Model-driven autonomous scheduling
-mcp/                      # Reference MCP server configs
-├── slack.json
-├── github.json
-├── postgres.json
-└── filesystem.json
+├── wake/                 # Wake strategies
+│   └── autonomous.ts     # Model-driven autonomous scheduling
+├── modules/              # Module catalog
+│   ├── slack/            # Slack messaging (MCP)
+│   ├── github/           # GitHub integration (MCP)
+│   ├── updater/          # Fork update checker
+│   ├── cursor/           # Cursor IDE CLI
+│   └── claude/           # Claude Code CLI
+└── cli/                  # brian CLI
+    └── brian.ts          # Module management, sync, doctor
 ```
 
 ## What You Get
@@ -86,11 +89,6 @@ Implement `ModelProvider` to add LLM backends. The catalog ships with:
 - **`brian/models/vertex-ai`** — `VertexAIModel` (Gemini via Google Cloud)
 - **`brian/models/anthropic`** — `AnthropicModel` (Claude via Anthropic API)
 
-```typescript
-import { VertexAIModel } from 'brian/models/vertex-ai';
-import { AnthropicModel } from 'brian/models/anthropic';
-```
-
 ### Wake Strategies
 
 Implement `WakeStrategy` to control when brian wakes up. Strategies can inject their own tools and prompt sections. The catalog ships with:
@@ -105,38 +103,51 @@ Brian has three kinds of tools:
 2. **Catalog tools** — `bash` and `selfDeploy()`. Import from `brian/tools`.
 3. **MCP tools** — loaded from JSON configs. Any MCP-compatible server works.
 
-Custom tools implement the `Tool` interface:
+### Modules
 
-```typescript
-import type { Tool } from 'brian';
+Modules are the collective knowledge of all brians — tested setup scripts for common integrations. Each module knows how to install itself, check its status, and write context that the daemon reads at wake time.
 
-const myTool: Tool = {
-  name: 'my_tool',
-  definition: {
-    name: 'my_tool',
-    description: 'Does something useful',
-    parameters: { type: 'object', properties: { ... }, required: [...] },
-  },
-  async execute(input) {
-    return 'result';
-  },
-};
+Modules are managed via the `brian` CLI:
+
+```bash
+brian module list              # see available modules
+brian module install slack     # install a module
+brian module check             # check all module status
+brian doctor                   # full health check
+brian sync                     # sync fork with upstream
+brian sync --check             # check fork status only
 ```
 
-### MCP Configs
+Default modules (installed on `brian create`):
 
-The `mcp/` directory contains reference configs for common MCP servers. Copy the ones you need into your project's `mcp/` directory and set the required environment variables.
+- **slack** — Slack messaging via MCP
+- **github** — GitHub integration via MCP
+- **updater** — monitors fork for upstream changes
 
-Env vars in both `env` and `args` fields support `${VAR_NAME}` substitution from `process.env`.
+Optional modules:
+
+- **cursor** — Cursor IDE CLI detection and setup
+- **claude** — Claude Code CLI installation and setup
+
+Adding a new module is straightforward: create a directory under `src/modules/` with `check()` and `install()` functions. When a brian figures out how to set up something new, it contributes the module back to the repo.
+
+### Context
+
+The daemon reads all files from `~/.brian/context/` at every wake and includes them in the system prompt. Modules write context files here during install — this is how the agent learns about its available capabilities without any runtime hooks.
 
 ### State
 
 Brian stores state in `~/.brian/` (configurable via `stateDir`):
 
-```
+```text
 ~/.brian/
 ├── memory.md              # Long-term knowledge (agent-curated)
 ├── conversation.json      # Conversation state with compacted summary
+├── context/               # Dynamic wake-time context (module-managed)
+│   ├── slack.md           # Written by slack module
+│   ├── github.md          # Written by github module
+│   ├── fork-status.md     # Written by updater module
+│   └── ...
 └── logs/
     └── YYYY-MM-DD.md      # Daily activity logs
 ```

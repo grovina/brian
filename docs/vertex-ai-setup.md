@@ -33,3 +33,7 @@ For non-GCP servers, create a service account:
 - Create a service account with the **Vertex AI User** role
 - Generate a JSON key
 - Set `GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json` in your environment
+
+## 5. Set model location
+
+Set `VERTEX_AI_LOCATION` in brian's env file. Use `global` by default unless you need a specific regional endpoint.

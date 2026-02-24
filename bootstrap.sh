@@ -157,6 +157,7 @@ if [[ -z "${MODEL_PROVIDER:-}" ]]; then
 fi
 
 if [[ "$MODEL_PROVIDER" == "vertex-ai" ]]; then
+  ask "Vertex AI location" "${VERTEX_AI_LOCATION:-global}" VERTEX_AI_LOCATION
   gcloud services enable aiplatform.googleapis.com --project="$GCP_PROJECT" 2>/dev/null
   ok "Vertex AI API"
 fi
@@ -179,6 +180,8 @@ if [[ ! -f "$ENV_FILE" ]]; then
     echo ""
     if [[ "$MODEL_PROVIDER" == "vertex-ai" ]]; then
       echo "# Vertex AI — ${DOCS_BASE}/vertex-ai-setup.md"
+      echo "VERTEX_AI_LOCATION=${VERTEX_AI_LOCATION:-global}"
+      echo ""
     else
       echo "# Anthropic — ${DOCS_BASE}/anthropic-setup.md"
       echo "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}    # sk-ant-..."
@@ -204,6 +207,10 @@ else
       ADDED=true
     fi
   done
+  if [[ "$MODEL_PROVIDER" == "vertex-ai" ]] && ! grep -q "^VERTEX_AI_LOCATION=" "$ENV_FILE"; then
+    echo "VERTEX_AI_LOCATION=${VERTEX_AI_LOCATION:-global}" >> "$ENV_FILE"
+    ADDED=true
+  fi
 
   if $ADDED; then
     step "New fields added to your tokens"

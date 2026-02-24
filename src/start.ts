@@ -20,7 +20,7 @@ async function createModel(): Promise<ModelProvider> {
     const { VertexAIModel } = await import("./models/vertex-ai.js");
     return new VertexAIModel({
       project: process.env.GCP_PROJECT!,
-      region: process.env.GCP_REGION,
+      region: process.env.VERTEX_AI_LOCATION ?? "global",
     });
   }
 

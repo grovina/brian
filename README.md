@@ -63,6 +63,7 @@ Implement `ModelProvider` to add LLM backends. Ships with:
 - **`AnthropicModel`** — Claude via Anthropic API
 
 Selected at runtime via `MODEL_PROVIDER` env var.
+For Vertex AI, set `VERTEX_AI_LOCATION` (default: `global`).
 
 ### Wake Strategies
 

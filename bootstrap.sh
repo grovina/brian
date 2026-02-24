@@ -369,8 +369,6 @@ if ! gcloud compute ssh "$VM" $GCP_FLAGS --command "
   # Environment
   sudo mkdir -p /etc/brian &&
   sudo mv /tmp/brian.env /etc/brian/env &&
-  sudo chown brian:brian /etc/brian/env &&
-  sudo chmod 600 /etc/brian/env &&
   source /etc/brian/env &&
 
   # System packages + Node
@@ -385,6 +383,8 @@ if ! gcloud compute ssh "$VM" $GCP_FLAGS --command "
   id brian &>/dev/null || sudo useradd -m -s /bin/bash brian &&
   echo 'brian ALL=(ALL) NOPASSWD: ALL' | sudo tee /etc/sudoers.d/brian > /dev/null &&
   sudo chmod 440 /etc/sudoers.d/brian &&
+  sudo chown brian:brian /etc/brian/env &&
+  sudo chmod 600 /etc/brian/env &&
 
   # Git credentials
   sudo -u brian git config --global user.name \"\${BRIAN_NAME}\" &&

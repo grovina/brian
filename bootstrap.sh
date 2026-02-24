@@ -410,7 +410,9 @@ if ! gcloud compute ssh "$VM" $GCP_FLAGS --command "
 
   # Scaffold + modules + service
   sudo -u brian bash -c '
+    set -a
     source /etc/brian/env
+    set +a
     export BRIAN_APP_DIR=/home/brian/app
     export BRIAN_STATE_DIR=/home/brian/.brian
     export BRIAN_FRAMEWORK_DIR=/home/brian/brian

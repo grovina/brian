@@ -273,7 +273,7 @@ case "\$cmd" in
     gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "systemctl is-active brian" < /dev/null
     ;;
   logs)
-    gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "journalctl -u brian -f --no-pager" < /dev/null
+    gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "journalctl -u brian -n 200 -f --no-pager" < /dev/null
     ;;
   restart)
     gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "sudo systemctl restart brian && systemctl is-active brian" < /dev/null

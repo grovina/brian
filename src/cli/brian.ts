@@ -29,7 +29,7 @@ Commands:
   module check [name]         Check module status
   module help <name>          Show module usage guide
   doctor                      Run all health checks
-  sync                        Sync fork with upstream
+  sync [--force]              Sync fork with upstream
   sync --check                Check fork status only
   help                        This message`);
 }
@@ -262,6 +262,7 @@ async function handleDoctor(): Promise<void> {
 
 async function handleSync(args: string[]): Promise<void> {
   const ctx = resolveContext();
+  const force = args.includes("--force");
 
   if (args.includes("--check")) {
     console.log("Checking fork status...");
@@ -272,6 +273,16 @@ async function handleSync(args: string[]): Promise<void> {
 
   console.log("Syncing fork with upstream...");
   try {
+    if (force) {
+      console.log("Force mode: discarding local working tree changes...");
+      execFileSync("git", ["-C", ctx.repoDir, "reset", "--hard"], {
+        stdio: "inherit",
+      });
+      execFileSync("git", ["-C", ctx.repoDir, "clean", "-fd"], {
+        stdio: "inherit",
+      });
+    }
+
     execFileSync("git", ["-C", ctx.repoDir, "fetch", "upstream"], {
       stdio: "inherit",
     });
@@ -287,7 +298,7 @@ async function handleSync(args: string[]): Promise<void> {
     console.error(
       "✗ Sync failed — may need manual merge. Try: git -C " +
         ctx.repoDir +
-        " merge upstream/main"
+        " merge upstream/main (or retry with: brian sync --force)"
     );
     process.exit(1);
   }

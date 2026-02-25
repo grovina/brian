@@ -267,12 +267,12 @@ GCP_FLAGS=(--project="\${GCP_PROJECT}" --zone="\${ZONE}")
 usage() {
   cat <<'USAGE'
 Usage:
-  ctl status
-  ctl logs
-  ctl redeploy
-  ctl restart
-  ctl ssh
-  ctl destroy
+  ctl status    Show brian service status
+  ctl logs      Tail recent brian service logs
+  ctl redeploy  Pull, build, and restart brian on VM
+  ctl restart   Restart brian service on VM
+  ctl ssh       Open SSH session to VM
+  ctl destroy   Delete VM (destructive)
 USAGE
 }
 

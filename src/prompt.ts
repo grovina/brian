@@ -56,6 +56,8 @@ Use the brian CLI to manage your own capabilities:
   brian sync                 Sync fork with upstream
   brian redeploy             Pull, build, restart
 
+Prefer brian CLI flows for self-management when suitable. It performs important checks for you!
+
 ## Verification
 
 When external facts are uncertain, verify before acting, and prefer primary sources over assumptions or stale memory.

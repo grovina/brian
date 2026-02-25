@@ -4,7 +4,7 @@ import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import fs from "fs/promises";
 import { execFileSync, execSync } from "child_process";
-import { registry, getModule } from "../modules/index.js";
+import { registry, getModule, type CheckResult } from "../modules/index.js";
 import { syncCheck } from "../modules/updater/index.js";
 import type { InstallContext } from "../modules/types.js";
 
@@ -27,6 +27,7 @@ Commands:
   module list                 List available modules
   module install <name>       Install a module
   module check [name]         Check module status
+  module help <name>          Show module usage guide
   doctor                      Run all health checks
   sync                        Sync fork with upstream
   sync --check                Check fork status only
@@ -159,23 +160,23 @@ WantedBy=multi-user.target
 // ─────────────────────────────────────────────────
 
 async function handleModuleList(): Promise<void> {
-  console.log("Available modules:\n");
   const ctx = resolveContext();
 
   for (const mod of registry) {
-    const result = await mod.check(ctx).catch(() => ({
+    const result = await mod.check(ctx).catch((): CheckResult => ({
       installed: false,
       issues: ["check failed"],
     }));
-    const status = result.installed ? "✓" : "·";
-    const tag = mod.meta.default ? " (default)" : "";
-    console.log(
-      `  ${status}  ${mod.meta.id.padEnd(12)} ${mod.meta.description}${tag}`
-    );
-    if (!result.installed && result.issues?.length) {
-      for (const issue of result.issues) {
-        console.log(`       → ${issue}`);
-      }
+    if (result.installed) {
+      const ver = result.version ? ` (${result.version})` : "";
+      console.log(
+        `  ✓  ${mod.meta.id.padEnd(12)} ${mod.meta.description}${ver}`
+      );
+    } else {
+      const hint = result.issues?.[0] ?? "not installed";
+      console.log(
+        `  ·  ${mod.meta.id.padEnd(12)} ${hint} — run: brian module install ${mod.meta.id}`
+      );
     }
   }
 }
@@ -190,21 +191,25 @@ async function handleModuleInstall(name: string): Promise<void> {
   }
 
   const ctx = resolveContext();
-  console.log(`Installing ${mod.meta.name}...`);
 
   try {
     await mod.install(ctx);
     const result = await mod.check(ctx);
     if (result.installed) {
-      console.log(`✓ ${mod.meta.name} installed`);
+      const ver = result.version ? ` (${result.version})` : "";
+      console.log(`✓ ${mod.meta.name} installed${ver}`);
+      console.log(`  Use: ${mod.meta.usage}`);
+      console.log(`  More: brian module help ${mod.meta.id}`);
     } else {
-      console.log(`⚠ ${mod.meta.name} installed but has issues:`);
+      console.log(`⚠ ${mod.meta.name} not ready after install`);
       for (const issue of result.issues ?? []) {
         console.log(`  → ${issue}`);
       }
+      console.log(`  See: brian module help ${mod.meta.id}`);
     }
   } catch (err) {
-    console.error(`✗ Failed to install ${mod.meta.name}:`, err);
+    console.error(`✗ ${mod.meta.name} install failed: ${err}`);
+    console.error(`  Retry: brian module install ${mod.meta.id}`);
     process.exit(1);
   }
 }
@@ -222,18 +227,31 @@ async function handleModuleCheck(name?: string): Promise<void> {
     if (!mod) continue;
     try {
       const result = await mod.check(ctx);
-      const status = result.installed ? "✓" : "✗";
-      const version = result.version ? ` (${result.version})` : "";
-      console.log(`${status} ${mod.meta.name}${version}`);
-      if (!result.installed && result.issues?.length) {
-        for (const issue of result.issues) {
+      if (result.installed) {
+        const ver = result.version ? ` (${result.version})` : "";
+        console.log(`✓ ${mod.meta.name}${ver}`);
+      } else {
+        console.log(`✗ ${mod.meta.name}`);
+        for (const issue of result.issues ?? []) {
           console.log(`  → ${issue}`);
         }
+        console.log(`  Install: brian module install ${mod.meta.id}`);
       }
     } catch (err) {
       console.log(`✗ ${mod.meta.name}: check failed — ${err}`);
     }
   }
+}
+
+async function handleModuleHelp(name: string): Promise<void> {
+  const mod = getModule(name);
+  if (!mod) {
+    console.error(
+      `Unknown module: ${name}\nAvailable: ${registry.map((m) => m.meta.id).join(", ")}`
+    );
+    process.exit(1);
+  }
+  console.log(mod.meta.help);
 }
 
 // ─────────────────────────────────────────────────
@@ -269,7 +287,6 @@ async function handleRedeploy(): Promise<void> {
 }
 
 async function handleDoctor(): Promise<void> {
-  console.log("Running health checks...\n");
   await handleModuleCheck();
 }
 
@@ -335,8 +352,15 @@ async function main(): Promise<void> {
         case "check":
           await handleModuleCheck(rest[0]);
           break;
+        case "help":
+          if (!rest[0]) {
+            console.error("Usage: brian module help <name>");
+            process.exit(1);
+          }
+          await handleModuleHelp(rest[0]);
+          break;
         default:
-          console.error("Usage: brian module <list|install|check>");
+          console.error("Usage: brian module <list|install|check|help>");
           process.exit(1);
       }
       break;

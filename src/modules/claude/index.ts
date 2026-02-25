@@ -17,11 +17,26 @@ async function getClaudeVersion(): Promise<string | null> {
   }
 }
 
+const help = `\
+Claude Code — coding assistance via CLI
+
+Prerequisites:
+  claude CLI in PATH (npm install -g @anthropic-ai/claude-code)
+  ANTHROPIC_API_KEY in /etc/brian/env
+
+Usage:
+  claude --print "<task>"
+
+Use for coding tasks that benefit from Claude's reasoning capabilities.
+Good for code review, refactoring, and complex problem-solving.`;
+
 export const claudeModule: Module = {
   meta: {
     id: "claude",
     name: "Claude Code",
     description: "Coding assistance via Claude Code CLI",
+    usage: 'claude --print "<task>"',
+    help,
   },
 
   async check() {
@@ -31,9 +46,7 @@ export const claudeModule: Module = {
     }
     return {
       installed: false,
-      issues: [
-        "claude CLI not found in PATH. Install with: npm install -g @anthropic-ai/claude-code",
-      ],
+      issues: ["claude CLI not found in PATH"],
     };
   },
 
@@ -51,16 +64,17 @@ export const claudeModule: Module = {
       } catch {
         await fs.writeFile(
           path.join(contextDir, "claude.md"),
-          "## Claude Code\n\nClaude Code CLI installation failed. Try manually: `npm install -g @anthropic-ai/claude-code`\n"
+          "## Claude Code\n\nClaude Code CLI not installed. Install: brian module install claude\n"
         );
         return;
       }
     }
 
     const installedVersion = await getClaudeVersion();
+    const ver = installedVersion ? ` (${installedVersion})` : "";
     await fs.writeFile(
       path.join(contextDir, "claude.md"),
-      `## Claude Code\n\nClaude Code CLI is available${installedVersion ? ` (${installedVersion})` : ""}. Use \`bash\` to run \`claude\` commands for coding tasks.\n`
+      `## Claude Code\n\nClaude Code CLI available${ver}. See: brian module help claude\n`
     );
   },
 };

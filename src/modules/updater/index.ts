@@ -13,6 +13,20 @@ async function runGit(dir: string, args: string[]): Promise<string> {
   return stdout.trim();
 }
 
+const help = `\
+Fork Updater — monitors framework fork for upstream changes
+
+Prerequisites:
+  Git repo with upstream remote pointing to grovina/brian
+
+Usage:
+  brian sync --check    Check if fork is behind upstream
+  brian sync            Fetch and merge upstream changes
+
+Status is written to context/fork-status.md automatically.
+When behind upstream, sync to get latest framework improvements.
+Before syncing, ensure local changes are committed.`;
+
 export const updaterModule: Module = {
   meta: {
     id: "updater",
@@ -20,6 +34,8 @@ export const updaterModule: Module = {
     description:
       "Monitors framework fork for upstream changes and writes status to context",
     default: true,
+    usage: "brian sync --check / brian sync",
+    help,
   },
 
   async check(ctx) {

@@ -3,6 +3,8 @@ export interface ModuleMeta {
   name: string;
   description: string;
   default?: boolean;
+  usage: string;
+  help: string;
 }
 
 export interface CheckResult {

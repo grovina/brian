@@ -11,12 +11,37 @@ const mcpConfig = {
   },
 };
 
+const help = `\
+GitHub — repository and code collaboration
+
+Prerequisites:
+  GITHUB_TOKEN   Classic PAT with repo scope (ghp_...) in /etc/brian/env
+
+Setup guide: docs/github-setup.md
+
+Usage:
+  GitHub is available as MCP tools (prefixed github__).
+  Key tools:
+    github__list_pull_requests   List PRs in a repo
+    github__create_pull_request  Open a new PR
+    github__search_issues        Search issues and PRs
+    github__list_commits         View commit history
+    github__get_file_contents    Read a file from a repo
+
+  Requires restart after install: brian redeploy
+
+Tips:
+  Use PRs for code changes rather than pushing directly to main.
+  When opening PRs to upstream, keep changes focused and well-described.`;
+
 export const githubModule: Module = {
   meta: {
     id: "github",
     name: "GitHub",
     description: "GitHub integration via MCP",
     default: true,
+    usage: "github__ MCP tools",
+    help,
   },
 
   async check(ctx) {
@@ -46,7 +71,7 @@ export const githubModule: Module = {
     await fs.mkdir(contextDir, { recursive: true });
     await fs.writeFile(
       path.join(contextDir, "github.md"),
-      "## GitHub\n\nGitHub is configured. Use github__* tools for repositories, pull requests, issues, and code review.\n"
+      "## GitHub\n\nGitHub configured — use github__ MCP tools. See: brian module help github\n"
     );
   },
 };

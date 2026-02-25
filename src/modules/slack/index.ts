@@ -12,12 +12,37 @@ const mcpConfig = {
   },
 };
 
+const help = `\
+Slack — team messaging integration
+
+Prerequisites:
+  SLACK_TOKEN     Bot token (xoxp-...) in /etc/brian/env
+  SLACK_TEAM_ID   Workspace ID (T...) in /etc/brian/env
+
+Setup guide: docs/slack-setup.md
+
+Usage:
+  Slack is available as MCP tools (prefixed slack__).
+  Key tools:
+    slack__slack_post_message        Send a message to a channel
+    slack__slack_get_channel_history  Read recent channel messages
+    slack__slack_reply_to_thread     Reply in a thread
+    slack__slack_get_thread_replies   Read thread replies
+
+  Requires restart after install: brian redeploy
+
+Tips:
+  Use threads for ongoing conversations rather than top-level messages.
+  Check channel history on wake to catch up on missed messages.`;
+
 export const slackModule: Module = {
   meta: {
     id: "slack",
     name: "Slack",
-    description: "Slack messaging integration via MCP",
+    description: "Slack messaging via MCP",
     default: true,
+    usage: "slack__ MCP tools",
+    help,
   },
 
   async check(ctx) {
@@ -48,7 +73,7 @@ export const slackModule: Module = {
     await fs.mkdir(contextDir, { recursive: true });
     await fs.writeFile(
       path.join(contextDir, "slack.md"),
-      "## Slack\n\nSlack is configured. Use slack__* tools for messaging, channel management, and team communication.\n"
+      "## Slack\n\nSlack configured — use slack__ MCP tools. See: brian module help slack\n"
     );
   },
 };

@@ -269,6 +269,7 @@ usage() {
 Usage:
   ctl status    Show brian service status
   ctl logs      Tail recent brian service logs
+  ctl sync      Sync fork with upstream on VM
   ctl redeploy  Pull, build, and restart brian on VM
   ctl restart   Restart brian service on VM
   ctl ssh       Open SSH session to VM
@@ -283,6 +284,9 @@ case "\$cmd" in
     ;;
   logs)
     gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "journalctl -u brian -n 200 -f --no-pager" < /dev/null
+    ;;
+  sync)
+    gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "sudo -u brian -H brian sync" < /dev/null
     ;;
   redeploy)
     gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "sudo -u brian -H brian redeploy" < /dev/null
@@ -465,6 +469,7 @@ echo
 info "$(dim "day-2 commands (from your machine):")"
 info "  $CTL_FILE status"
 info "  $CTL_FILE logs"
+info "  $CTL_FILE sync"
 info "  $CTL_FILE redeploy"
 info "  $CTL_FILE restart"
 info "  $CTL_FILE ssh"

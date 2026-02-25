@@ -287,6 +287,15 @@ async function handleRedeploy(): Promise<void> {
 }
 
 async function handleDoctor(): Promise<void> {
+  const name = process.env.BRIAN_NAME ?? "(not set)";
+  const provider = process.env.MODEL_PROVIDER ?? "?";
+  const project = process.env.GCP_PROJECT ?? "(not set)";
+
+  console.log(`${name} @ ${project}`);
+  console.log(`  Model: ${provider}`);
+  console.log(`  Config: /etc/brian/env`);
+  console.log(`  To change: edit /etc/brian/env, then brian redeploy`);
+  console.log();
   await handleModuleCheck();
 }
 

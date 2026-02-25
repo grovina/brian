@@ -7,6 +7,7 @@ import { execFileSync, execSync } from "child_process";
 import { registry, getModule, type CheckResult } from "../modules/index.js";
 import { syncCheck } from "../modules/updater/index.js";
 import type { InstallContext } from "../modules/types.js";
+import { checkModelConfig } from "../model.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -24,6 +25,7 @@ function printUsage(): void {
 Commands:
   setup                       Initialize state, install modules, start daemon
   redeploy                    Pull, build, restart (with rollback)
+  config check                Validate runtime config and model connectivity
   module list                 List available modules
   module install <name>       Install a module
   module check [name]         Check module status
@@ -231,6 +233,15 @@ async function handleRedeploy(): Promise<void> {
   console.log("Building...");
   execSync(`cd ${ctx.repoDir} && npm run build`, { stdio: "inherit" });
 
+  console.log("Validating configuration...");
+  try {
+    await checkModelConfig();
+    console.log("✓ Config is valid");
+  } catch (err) {
+    console.error(`✗ Config check failed: ${(err as Error).message}`);
+    process.exit(1);
+  }
+
   console.log("Restarting...");
   try {
     execSync("sudo systemctl restart brian", { stdio: "inherit" });
@@ -243,6 +254,16 @@ async function handleRedeploy(): Promise<void> {
     execSync(`cd ${ctx.repoDir} && npm install && npm run build`, { stdio: "inherit" });
     execSync("sudo systemctl restart brian", { stdio: "inherit" });
     console.error("Rolled back to previous version.");
+    process.exit(1);
+  }
+}
+
+async function handleConfigCheck(): Promise<void> {
+  try {
+    await checkModelConfig();
+    console.log("✓ Config and model connectivity check passed");
+  } catch (err) {
+    console.error(`✗ Config check failed: ${(err as Error).message}`);
     process.exit(1);
   }
 }
@@ -317,6 +338,14 @@ async function main(): Promise<void> {
       break;
     case "redeploy":
       await handleRedeploy();
+      break;
+    case "config":
+      if (subcommand === "check") {
+        await handleConfigCheck();
+        break;
+      }
+      console.error("Usage: brian config check");
+      process.exit(1);
       break;
     case "module":
       switch (subcommand) {

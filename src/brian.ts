@@ -37,7 +37,6 @@ export class Brian {
       model: this.config.model,
       tools,
       mcp: this.mcp,
-      instructions: this.config.instructions,
       extraPromptSections: wakePrompt ? [wakePrompt] : undefined,
     });
 

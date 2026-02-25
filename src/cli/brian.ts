@@ -46,49 +46,10 @@ async function handleSetup(): Promise<void> {
   }
 
   const ctx = resolveContext();
-  const org = process.env.GITHUB_ORG ?? "";
 
   console.log("Initializing state directory...");
   await fs.mkdir(resolve(ctx.stateDir, "mcp"), { recursive: true });
   await fs.mkdir(resolve(ctx.stateDir, "context"), { recursive: true });
-
-  const instructionsPath = resolve(ctx.stateDir, "instructions.md");
-  try {
-    await fs.access(instructionsPath);
-  } catch {
-    let instructions = `## First Run
-
-This is your first deployment. Introduce yourself on Slack, explain what you
-can do, and ask the team what they need. Once you've done that, remove this
-section and commit the change.
-`;
-
-    if (org) {
-      instructions += `
-## About
-
-You're built on the brian framework. Your org has a fork at
-github.com/${org}/brian (upstream: github.com/grovina/brian).
-
-When you identify improvements that would benefit all brians, push changes
-to your fork and open a PR to upstream.
-`;
-    }
-
-    instructions += `
-## Managing Capabilities
-
-Use the \`brian\` CLI to manage your modules and integrations:
-
-  brian module list          — see available modules
-  brian module install X     — install a module
-  brian redeploy             — pull, build, restart
-  brian doctor               — check health
-  brian sync                 — sync fork with upstream
-`;
-
-    await fs.writeFile(instructionsPath, instructions);
-  }
 
   console.log("Installing default modules...");
   for (const mod of registry.filter((m) => m.meta.default)) {

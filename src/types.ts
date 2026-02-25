@@ -66,6 +66,5 @@ export interface BrianConfig {
   wake: WakeStrategy;
   tools?: Tool[];
   mcp?: string | string[];
-  instructions?: string;
   stateDir?: string;
 }

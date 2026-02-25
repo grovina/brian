@@ -21,7 +21,6 @@ interface AgentConfig {
   model: ModelProvider;
   tools: Tool[];
   mcp: MCPManager;
-  instructions?: string;
   extraPromptSections?: string[];
 }
 
@@ -73,7 +72,6 @@ export class Agent {
     const systemPrompt = await buildSystemPrompt({
       name: this.config.name,
       stateDir: this.config.stateDir,
-      instructions: this.config.instructions,
       extraSections: this.config.extraPromptSections,
     });
 

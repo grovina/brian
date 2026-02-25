@@ -36,7 +36,6 @@ const brian = new Brian({
   wake: new AutonomousWake(),
   tools: [bash],
   mcp: path.join(stateDir, "mcp"),
-  instructions: path.join(stateDir, "instructions.md"),
   stateDir,
 });
 

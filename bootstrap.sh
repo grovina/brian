@@ -272,6 +272,7 @@ Usage:
   ctl redeploy
   ctl restart
   ctl ssh
+  ctl destroy
 USAGE
 }
 
@@ -291,6 +292,17 @@ case "\$cmd" in
     ;;
   ssh)
     gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}"
+    ;;
+  destroy)
+    echo "This will permanently delete VM '\$VM' in project '\${GCP_PROJECT}' (zone '\${ZONE}')."
+    printf "Type DESTROY to confirm: "
+    read -r confirm < /dev/tty
+    if [[ "\$confirm" != "DESTROY" ]]; then
+      echo "Aborted."
+      exit 1
+    fi
+    gcloud compute instances delete "\$VM" "\${GCP_FLAGS[@]}" --quiet
+    echo "VM '\$VM' deleted."
     ;;
   help|*)
     usage
@@ -456,4 +468,5 @@ info "  $CTL_FILE logs"
 info "  $CTL_FILE redeploy"
 info "  $CTL_FILE restart"
 info "  $CTL_FILE ssh"
+info "  $CTL_FILE destroy"
 echo

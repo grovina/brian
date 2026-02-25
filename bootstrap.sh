@@ -269,7 +269,7 @@ usage() {
 Usage:
   ctl status    Show brian service status
   ctl logs      Tail recent brian service logs
-  ctl sync      Sync fork with upstream on VM (add --force to discard local changes)
+  ctl sync [--force]  Sync fork with upstream on VM
   ctl redeploy  Pull, build, and restart brian on VM
   ctl restart   Restart brian service on VM
   ctl ssh       Open SSH session to VM

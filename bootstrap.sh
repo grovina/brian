@@ -271,6 +271,7 @@ Usage:
   ctl logs      Tail recent brian service logs
   ctl sync [--force]  Sync fork with upstream on VM
   ctl redeploy  Pull, build, and restart brian on VM
+  ctl reset <conversation|memory|all>  Reset brian state and restart service
   ctl restart   Restart brian service on VM
   ctl ssh       Open SSH session to VM
   ctl destroy   Delete VM (destructive)
@@ -294,6 +295,31 @@ case "\$cmd" in
     ;;
   redeploy)
     gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "sudo -u brian -H brian redeploy" < /dev/null
+    ;;
+  reset)
+    target="\${2:-conversation}"
+    case "\$target" in
+      conversation)
+        gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "sudo -u brian rm -f /home/brian/.brian/conversation.json && sudo systemctl restart brian && systemctl is-active brian" < /dev/null
+        ;;
+      memory)
+        gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "sudo -u brian bash -lc ': > /home/brian/.brian/memory.md' && sudo systemctl restart brian && systemctl is-active brian" < /dev/null
+        ;;
+      all)
+        echo "This will clear conversation + memory for '\$VM' and restart brian."
+        printf "Type RESET to confirm: "
+        read -r confirm < /dev/tty
+        if [[ "\$confirm" != "RESET" ]]; then
+          echo "Aborted."
+          exit 1
+        fi
+        gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "sudo -u brian rm -f /home/brian/.brian/conversation.json && sudo -u brian bash -lc ': > /home/brian/.brian/memory.md' && sudo systemctl restart brian && systemctl is-active brian" < /dev/null
+        ;;
+      *)
+        echo "Usage: ctl reset <conversation|memory|all>"
+        exit 1
+        ;;
+    esac
     ;;
   restart)
     gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "sudo systemctl restart brian && systemctl is-active brian" < /dev/null
@@ -475,6 +501,9 @@ info "  $CTL_FILE status"
 info "  $CTL_FILE logs"
 info "  $CTL_FILE sync"
 info "  $CTL_FILE redeploy"
+info "  $CTL_FILE reset conversation"
+info "  $CTL_FILE reset memory"
+info "  $CTL_FILE reset all"
 info "  $CTL_FILE restart"
 info "  $CTL_FILE ssh"
 info "  $CTL_FILE destroy"

@@ -14,7 +14,9 @@ if (!name) {
 const stateDir = process.env.BRIAN_STATE_DIR ?? path.join(homedir(), ".brian");
 
 async function createModel(): Promise<ModelProvider> {
-  const provider = process.env.MODEL_PROVIDER ?? "vertex-ai";
+  // Model provider is an operational config choice.
+  // Change it via /etc/brian/env + redeploy, not by editing provider code.
+  const provider = process.env.MODEL_PROVIDER?.trim() || "vertex-ai";
 
   if (provider === "vertex-ai") {
     const { VertexAIModel } = await import("./models/vertex-ai.js");
@@ -24,10 +26,16 @@ async function createModel(): Promise<ModelProvider> {
     });
   }
 
-  const { AnthropicModel } = await import("./models/anthropic.js");
-  return new AnthropicModel({
-    apiKey: process.env.ANTHROPIC_API_KEY,
-  });
+  if (provider === "anthropic") {
+    const { AnthropicModel } = await import("./models/anthropic.js");
+    return new AnthropicModel({
+      apiKey: process.env.ANTHROPIC_API_KEY,
+    });
+  }
+
+  throw new Error(
+    `Unsupported MODEL_PROVIDER: ${provider}. Expected 'vertex-ai' or 'anthropic'.`
+  );
 }
 
 const brian = new Brian({

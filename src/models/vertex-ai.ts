@@ -12,6 +12,9 @@ import type {
   ToolCall,
 } from "../types.js";
 
+// Runtime model adapter.
+// Operational provider/model changes belong in config (/etc/brian/env), avoid edits here.
+
 export interface VertexAIConfig {
   project: string;
   region?: string;

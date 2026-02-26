@@ -264,15 +264,109 @@ VM="\${BRIAN_NAME}"
 ZONE="\${GCP_REGION}-b"
 GCP_FLAGS=(--project="\${GCP_PROJECT}" --zone="\${ZONE}")
 
+refresh_env() {
+  source "\$ENV_FILE"
+  VM="\${BRIAN_NAME}"
+  ZONE="\${GCP_REGION}-b"
+  GCP_FLAGS=(--project="\${GCP_PROJECT}" --zone="\${ZONE}")
+}
+
+remote_cmd() {
+  gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "\$1" < /dev/null
+}
+
+remote_env_to_tmp() {
+  local tmp_file
+  tmp_file=\$(mktemp)
+  if gcloud compute scp "\${GCP_FLAGS[@]}" "\${VM}:/etc/brian/env" "\$tmp_file" < /dev/null > /dev/null 2>&1; then
+    printf '%s\n' "\$tmp_file"
+    return 0
+  fi
+  rm -f "\$tmp_file"
+  return 1
+}
+
+redact_env_file() {
+  sed -E 's/^((.*TOKEN|.*KEY|.*SECRET|.*PASSWORD)=).*/\1<redacted>/'
+}
+
+env_show() {
+  echo "Local env: \$ENV_FILE"
+  grep -E '^(BRIAN_NAME|GCP_PROJECT|GCP_REGION|MODEL_PROVIDER|VERTEX_AI_LOCATION)=' "\$ENV_FILE" || true
+}
+
+env_push() {
+  echo "Pushing env to VM..."
+  gcloud compute scp "\${GCP_FLAGS[@]}" "\$ENV_FILE" "\${VM}:/tmp/brian.env" < /dev/null > /dev/null
+  remote_cmd "sudo mkdir -p /etc/brian && sudo mv /tmp/brian.env /etc/brian/env && sudo chown brian:brian /etc/brian/env && sudo chmod 600 /etc/brian/env"
+  echo "Env updated on VM: /etc/brian/env"
+}
+
+env_pull() {
+  local backup
+  backup="\${ENV_FILE}.bak.\$(date +%Y%m%d-%H%M%S)"
+  cp "\$ENV_FILE" "\$backup"
+  gcloud compute scp "\${GCP_FLAGS[@]}" "\${VM}:/etc/brian/env" "\$ENV_FILE" < /dev/null > /dev/null
+  echo "Pulled VM env into \$ENV_FILE (backup: \$backup)"
+  refresh_env
+}
+
+env_edit() {
+  if [[ -n "\${EDITOR:-}" ]]; then
+    "\$EDITOR" "\$ENV_FILE"
+  elif command -v nano &>/dev/null; then
+    nano "\$ENV_FILE"
+  else
+    vi "\$ENV_FILE"
+  fi
+  refresh_env
+}
+
+env_diff() {
+  local remote_tmp
+  if ! remote_tmp=\$(remote_env_to_tmp); then
+    echo "VM env not found at /etc/brian/env"
+    return 1
+  fi
+  echo "Diff (local vs VM, secrets redacted):"
+  diff -u <(redact_env_file < "\$ENV_FILE") <(redact_env_file < "\$remote_tmp") || true
+  rm -f "\$remote_tmp"
+}
+
+redeploy_remote() {
+  local reset_memory="\${1:-false}"
+  remote_cmd "sudo -u brian bash -lc '
+    set -euo pipefail
+    set -a
+    source /etc/brian/env
+    set +a
+    REPO_DIR=/home/brian/brian
+    git -C \"\$REPO_DIR\" fetch origin main
+    git -C \"\$REPO_DIR\" reset --hard origin/main
+    cd \"\$REPO_DIR\"
+    npm install
+    npm run build
+    brian config check
+  '"
+  if [[ "\$reset_memory" == "true" ]]; then
+    remote_cmd "sudo -u brian bash -lc ': > /home/brian/.brian/memory.md'"
+  fi
+  remote_cmd "sudo systemctl restart brian && systemctl is-active brian"
+}
+
 usage() {
   cat <<'USAGE'
 Usage:
   ctl status    Show brian service status
   ctl logs      Tail recent brian service logs
+  ctl env show  Show local env file and key runtime fields
+  ctl env push  Copy local env to VM (/etc/brian/env)
+  ctl env pull  Copy VM env to local env file
+  ctl env edit  Open local env file in editor
+  ctl env diff  Show local/VM env diff (redacted)
   ctl sync [--force]  Sync fork with upstream on VM
-  ctl redeploy  Pull, build, and restart brian on VM
-  ctl reset <conversation|memory|all>  Reset brian state and restart service
-  ctl restart   Restart brian service on VM
+  ctl redeploy [--reset memory]
+  ctl restart
   ctl ssh       Open SSH session to VM
   ctl destroy   Delete VM (destructive)
 USAGE
@@ -286,6 +380,20 @@ case "\$cmd" in
   logs)
     gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "journalctl -u brian -n 200 -f --no-pager" < /dev/null
     ;;
+  env)
+    subcmd="\${2:-show}"
+    case "\$subcmd" in
+      show) env_show ;;
+      push) env_push ;;
+      pull) env_pull ;;
+      edit) env_edit ;;
+      diff) env_diff ;;
+      *)
+        echo "Usage: ctl env <show|push|pull|edit|diff>"
+        exit 1
+        ;;
+    esac
+    ;;
   sync)
     if [[ "\${2:-}" == "--force" ]]; then
       gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "sudo -u brian -H brian sync --force" < /dev/null
@@ -294,35 +402,34 @@ case "\$cmd" in
     fi
     ;;
   redeploy)
-    gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "sudo -u brian -H brian redeploy" < /dev/null
-    ;;
-  reset)
-    target="\${2:-conversation}"
-    case "\$target" in
-      conversation)
-        gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "sudo -u brian rm -f /home/brian/.brian/conversation.json && sudo systemctl restart brian && systemctl is-active brian" < /dev/null
-        ;;
-      memory)
-        gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "sudo -u brian bash -lc ': > /home/brian/.brian/memory.md' && sudo systemctl restart brian && systemctl is-active brian" < /dev/null
-        ;;
-      all)
-        echo "This will clear conversation + memory for '\$VM' and restart brian."
-        printf "Type RESET to confirm: "
-        read -r confirm < /dev/tty
-        if [[ "\$confirm" != "RESET" ]]; then
-          echo "Aborted."
-          exit 1
-        fi
-        gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "sudo -u brian rm -f /home/brian/.brian/conversation.json && sudo -u brian bash -lc ': > /home/brian/.brian/memory.md' && sudo systemctl restart brian && systemctl is-active brian" < /dev/null
-        ;;
-      *)
-        echo "Usage: ctl reset <conversation|memory|all>"
+    reset_memory=false
+    if [[ "\${2:-}" == "--reset" ]]; then
+      if [[ "\${3:-}" != "memory" ]]; then
+        echo "Usage: ctl redeploy [--reset memory]"
         exit 1
-        ;;
-    esac
+      fi
+      echo "This will clear memory.md for '\$VM' after redeploy."
+      printf "Type RESET to confirm: "
+      read -r confirm < /dev/tty
+      if [[ "\$confirm" != "RESET" ]]; then
+        echo "Aborted."
+        exit 1
+      fi
+      reset_memory=true
+    elif [[ -n "\${2:-}" ]]; then
+      echo "Usage: ctl redeploy [--reset memory]"
+      exit 1
+    fi
+
+    env_push
+    redeploy_remote "\$reset_memory"
     ;;
   restart)
-    gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "sudo systemctl restart brian && systemctl is-active brian" < /dev/null
+    if [[ -n "\${2:-}" ]]; then
+      echo "Usage: ctl restart"
+      exit 1
+    fi
+    remote_cmd "sudo systemctl restart brian && systemctl is-active brian"
     ;;
   ssh)
     gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}"
@@ -499,11 +606,12 @@ echo
 info "$(dim "day-2 commands (from your machine):")"
 info "  $CTL_FILE status"
 info "  $CTL_FILE logs"
+info "  $CTL_FILE env show"
+info "  $CTL_FILE env push"
+info "  $CTL_FILE env diff"
 info "  $CTL_FILE sync"
 info "  $CTL_FILE redeploy"
-info "  $CTL_FILE reset conversation"
-info "  $CTL_FILE reset memory"
-info "  $CTL_FILE reset all"
+info "  $CTL_FILE redeploy --reset memory"
 info "  $CTL_FILE restart"
 info "  $CTL_FILE ssh"
 info "  $CTL_FILE destroy"

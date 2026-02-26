@@ -128,7 +128,7 @@ export class VertexAIModel implements ModelProvider {
           });
         }
       } else {
-        if (msg.metadata && Array.isArray(msg.metadata)) {
+        if (Array.isArray(msg.metadata) && msg.metadata.length > 0) {
           contents.push({ role: "model", parts: msg.metadata as Part[] });
         } else {
           const parts: Part[] = [];

@@ -95,13 +95,23 @@ export class Agent {
 
       const startTime = Date.now();
       const response = await this.callWithRetry(systemPrompt, toolDefs);
+      const metadata =
+        Array.isArray(response.metadata) && response.metadata.length === 0
+          ? undefined
+          : response.metadata;
+      const hasAssistantContent =
+        Boolean(response.text) ||
+        Boolean(response.toolCalls && response.toolCalls.length > 0) ||
+        metadata !== undefined;
 
-      this.history.push({
-        role: "assistant",
-        text: response.text,
-        toolCalls: response.toolCalls,
-        metadata: response.metadata,
-      });
+      if (hasAssistantContent) {
+        this.history.push({
+          role: "assistant",
+          text: response.text,
+          toolCalls: response.toolCalls,
+          metadata,
+        });
+      }
 
       if (response.toolCalls && response.toolCalls.length > 0) {
         const results = await this.executeToolCalls(response.toolCalls);

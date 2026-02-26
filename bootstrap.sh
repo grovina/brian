@@ -264,35 +264,22 @@ VM="\${BRIAN_NAME}"
 ZONE="\${GCP_REGION}-b"
 GCP_FLAGS=(--project="\${GCP_PROJECT}" --zone="\${ZONE}")
 
-refresh_env() {
-  source "\$ENV_FILE"
-  VM="\${BRIAN_NAME}"
-  ZONE="\${GCP_REGION}-b"
-  GCP_FLAGS=(--project="\${GCP_PROJECT}" --zone="\${ZONE}")
-}
-
 remote_cmd() {
   gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "\$1" < /dev/null
 }
 
-remote_env_to_tmp() {
-  local tmp_file
-  tmp_file=\$(mktemp)
-  if gcloud compute scp "\${GCP_FLAGS[@]}" "\${VM}:/etc/brian/env" "\$tmp_file" < /dev/null > /dev/null 2>&1; then
-    printf '%s\n' "\$tmp_file"
-    return 0
+env_open() {
+  if [[ "\$(uname)" == "Darwin" ]]; then
+    open -t "\$ENV_FILE" < /dev/null
+  elif command -v xdg-open &>/dev/null; then
+    xdg-open "\$ENV_FILE" < /dev/null 2>/dev/null || true
+  elif [[ -n "\${EDITOR:-}" ]]; then
+    "\$EDITOR" "\$ENV_FILE"
+  elif command -v nano &>/dev/null; then
+    nano "\$ENV_FILE"
+  else
+    vi "\$ENV_FILE"
   fi
-  rm -f "\$tmp_file"
-  return 1
-}
-
-redact_env_file() {
-  sed -E 's/^((.*TOKEN|.*KEY|.*SECRET|.*PASSWORD)=).*/\1<redacted>/'
-}
-
-env_show() {
-  echo "Local env: \$ENV_FILE"
-  grep -E '^(BRIAN_NAME|GCP_PROJECT|GCP_REGION|MODEL_PROVIDER|VERTEX_AI_LOCATION)=' "\$ENV_FILE" || true
 }
 
 env_push() {
@@ -302,54 +289,24 @@ env_push() {
   echo "Env updated on VM: /etc/brian/env"
 }
 
-env_pull() {
-  local backup
-  backup="\${ENV_FILE}.bak.\$(date +%Y%m%d-%H%M%S)"
-  cp "\$ENV_FILE" "\$backup"
-  gcloud compute scp "\${GCP_FLAGS[@]}" "\${VM}:/etc/brian/env" "\$ENV_FILE" < /dev/null > /dev/null
-  echo "Pulled VM env into \$ENV_FILE (backup: \$backup)"
-  refresh_env
-}
-
-env_edit() {
-  if [[ -n "\${EDITOR:-}" ]]; then
-    "\$EDITOR" "\$ENV_FILE"
-  elif command -v nano &>/dev/null; then
-    nano "\$ENV_FILE"
-  else
-    vi "\$ENV_FILE"
-  fi
-  refresh_env
-}
-
-env_diff() {
-  local remote_tmp
-  if ! remote_tmp=\$(remote_env_to_tmp); then
-    echo "VM env not found at /etc/brian/env"
-    return 1
-  fi
-  echo "Diff (local vs VM, secrets redacted):"
-  diff -u <(redact_env_file < "\$ENV_FILE") <(redact_env_file < "\$remote_tmp") || true
-  rm -f "\$remote_tmp"
-}
-
 redeploy_remote() {
-  local reset_memory="\${1:-false}"
+  local reset_state="\${1:-false}"
   remote_cmd "sudo -u brian bash -lc '
     set -euo pipefail
     set -a
     source /etc/brian/env
     set +a
     REPO_DIR=/home/brian/brian
-    git -C \"\$REPO_DIR\" fetch origin main
-    git -C \"\$REPO_DIR\" reset --hard origin/main
+    cd \"\$REPO_DIR\"
+    brian sync --force
+    git -C \"\$REPO_DIR\" clean -fd
     cd \"\$REPO_DIR\"
     npm install
     npm run build
     brian config check
   '"
-  if [[ "\$reset_memory" == "true" ]]; then
-    remote_cmd "sudo -u brian bash -lc ': > /home/brian/.brian/memory.md'"
+  if [[ "\$reset_state" == "true" ]]; then
+    remote_cmd "sudo -u brian bash -lc 'rm -f /home/brian/.brian/conversation.json /home/brian/.brian/slack-cursors.json && : > /home/brian/.brian/memory.md'"
   fi
   remote_cmd "sudo systemctl restart brian && systemctl is-active brian"
 }
@@ -359,13 +316,8 @@ usage() {
 Usage:
   ctl status    Show brian service status
   ctl logs      Tail recent brian service logs
-  ctl env show  Show local env file and key runtime fields
-  ctl env push  Copy local env to VM (/etc/brian/env)
-  ctl env pull  Copy VM env to local env file
-  ctl env edit  Open local env file in editor
-  ctl env diff  Show local/VM env diff (redacted)
-  ctl sync [--check|--force]  Sync fork with upstream on VM
-  ctl redeploy [--reset memory]
+  ctl env       Open local env file
+  ctl redeploy [--state]
   ctl restart
   ctl ssh       Open SSH session to VM
   ctl destroy   Delete VM (destructive)
@@ -375,59 +327,36 @@ USAGE
 cmd="\${1:-help}"
 case "\$cmd" in
   status)
-    gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "systemctl is-active brian" < /dev/null
+    remote_cmd "systemctl is-active brian; echo '---'; sudo -u brian -H brian sync --check; echo '---'; sudo -u brian cat /home/brian/.brian/context/fork-status.md"
     ;;
   logs)
     gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "journalctl -u brian -n 200 -f --no-pager" < /dev/null
     ;;
   env)
-    subcmd="\${2:-show}"
-    case "\$subcmd" in
-      show) env_show ;;
-      push) env_push ;;
-      pull) env_pull ;;
-      edit) env_edit ;;
-      diff) env_diff ;;
-      *)
-        echo "Usage: ctl env <show|push|pull|edit|diff>"
-        exit 1
-        ;;
-    esac
-    ;;
-  sync)
-    if [[ "\${2:-}" == "--check" ]]; then
-      gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "sudo -u brian -H brian sync --check" < /dev/null
-    elif [[ "\${2:-}" == "--force" ]]; then
-      gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "sudo -u brian -H brian sync --force" < /dev/null
-    elif [[ -n "\${2:-}" ]]; then
-      echo "Usage: ctl sync [--check|--force]"
+    if [[ -n "\${2:-}" ]]; then
+      echo "Usage: ctl env"
       exit 1
-    else
-      gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "sudo -u brian -H brian sync" < /dev/null
     fi
+    env_open
     ;;
   redeploy)
-    reset_memory=false
-    if [[ "\${2:-}" == "--reset" ]]; then
-      if [[ "\${3:-}" != "memory" ]]; then
-        echo "Usage: ctl redeploy [--reset memory]"
-        exit 1
-      fi
-      echo "This will clear memory.md for '\$VM' after redeploy."
+    reset_state=false
+    if [[ "\${2:-}" == "--state" ]]; then
+      echo "This will clear conversation, memory, and slack cursors for '\$VM' after redeploy."
       printf "Type RESET to confirm: "
       read -r confirm < /dev/tty
       if [[ "\$confirm" != "RESET" ]]; then
         echo "Aborted."
         exit 1
       fi
-      reset_memory=true
+      reset_state=true
     elif [[ -n "\${2:-}" ]]; then
-      echo "Usage: ctl redeploy [--reset memory]"
+      echo "Usage: ctl redeploy [--state]"
       exit 1
     fi
 
     env_push
-    redeploy_remote "\$reset_memory"
+    redeploy_remote "\$reset_state"
     ;;
   restart)
     if [[ -n "\${2:-}" ]]; then
@@ -616,7 +545,7 @@ info "  $CTL_FILE env push"
 info "  $CTL_FILE env diff"
 info "  $CTL_FILE sync"
 info "  $CTL_FILE redeploy"
-info "  $CTL_FILE redeploy --reset memory"
+info "  $CTL_FILE redeploy --state"
 info "  $CTL_FILE restart"
 info "  $CTL_FILE ssh"
 info "  $CTL_FILE destroy"

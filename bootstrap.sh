@@ -364,7 +364,7 @@ Usage:
   ctl env pull  Copy VM env to local env file
   ctl env edit  Open local env file in editor
   ctl env diff  Show local/VM env diff (redacted)
-  ctl sync [--force]  Sync fork with upstream on VM
+  ctl sync [--check|--force]  Sync fork with upstream on VM
   ctl redeploy [--reset memory]
   ctl restart
   ctl ssh       Open SSH session to VM
@@ -395,8 +395,13 @@ case "\$cmd" in
     esac
     ;;
   sync)
-    if [[ "\${2:-}" == "--force" ]]; then
+    if [[ "\${2:-}" == "--check" ]]; then
+      gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "sudo -u brian -H brian sync --check" < /dev/null
+    elif [[ "\${2:-}" == "--force" ]]; then
       gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "sudo -u brian -H brian sync --force" < /dev/null
+    elif [[ -n "\${2:-}" ]]; then
+      echo "Usage: ctl sync [--check|--force]"
+      exit 1
     else
       gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "sudo -u brian -H brian sync" < /dev/null
     fi

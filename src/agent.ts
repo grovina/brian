@@ -82,6 +82,7 @@ export class Agent {
   private config: AgentConfig;
   private toolMap: Map<string, Tool>;
   private turnStore: TurnStore;
+  private turnSeq = 0;
 
   constructor(config: AgentConfig) {
     this.config = config;
@@ -100,20 +101,15 @@ export class Agent {
     });
 
     while (true) {
+      const turnId = ++this.turnSeq;
       const turnInput = await this.buildTurnInput(toolDefs);
 
       const startTime = Date.now();
-      const response = await this.callWithRetry(turnInput);
+      const response = await this.callWithRetry(turnInput, turnId);
       const durationMs = Date.now() - startTime;
 
-      if (response.text) {
-        console.log(`assistant ${clip(oneLine(response.text))}`);
-      }
-      if (response.toolCalls && response.toolCalls.length > 0) {
-        const names = response.toolCalls.map((call) => call.name).join(", ");
-        console.log(`tools requested ${names}`);
-      }
-      console.log(`model response in ${durationMs}ms`);
+      const requestedTools = response.toolCalls?.length ?? 0;
+      console.log(`[turn ${turnId}] model done ${durationMs}ms (tools: ${requestedTools})`);
 
       await this.turnStore.save({
         ts: new Date().toISOString(),
@@ -139,7 +135,7 @@ export class Agent {
       }
 
       if (response.toolCalls && response.toolCalls.length > 0) {
-        const results = await this.executeToolCalls(response.toolCalls);
+        const results = await this.executeToolCalls(response.toolCalls, turnId);
 
         const pending = this.config.updates.drain();
         const updateText =
@@ -182,7 +178,7 @@ export class Agent {
     });
   }
 
-  private async callWithRetry(input: TurnInput) {
+  private async callWithRetry(input: TurnInput, turnId: number) {
     let lastError: Error | null = null;
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       try {
@@ -194,9 +190,13 @@ export class Agent {
       } catch (err) {
         lastError = err as Error;
         if (attempt < MAX_RETRIES - 1) {
-          console.error(`model error: ${clip(formatErrorMessage(lastError))}; retrying`);
+          console.error(
+            `[turn ${turnId}] model error attempt ${attempt + 1}/${MAX_RETRIES}: ${clip(formatErrorMessage(lastError))} (retrying)`
+          );
         } else {
-          console.error(`model error: ${clip(formatErrorMessage(lastError))}; giving up`);
+          console.error(
+            `[turn ${turnId}] model error attempt ${attempt + 1}/${MAX_RETRIES}: ${clip(formatErrorMessage(lastError))} (giving up)`
+          );
         }
         if (attempt < MAX_RETRIES - 1) {
           const delay = Math.pow(2, attempt) * 1000;
@@ -208,28 +208,41 @@ export class Agent {
   }
 
   private async executeToolCalls(
-    calls: { id: string; name: string; args: Record<string, unknown> }[]
+    calls: { id: string; name: string; args: Record<string, unknown> }[],
+    turnId: number
   ): Promise<ToolResult[]> {
     const results: ToolResult[] = [];
 
-    for (const call of calls) {
-      console.log(`>${call.name} ${formatArgs(call.args)}`);
+    for (const [index, call] of calls.entries()) {
+      const toolId = index + 1;
+      const prefix = `[turn ${turnId}] [tool ${toolId}] ${call.name}`;
+      console.log(`${prefix} ${formatArgs(call.args)}`);
+      const startedAt = Date.now();
 
       try {
         const tool = this.toolMap.get(call.name);
         if (!tool) {
           const msg = `Unknown tool: ${call.name}`;
           results.push(msg);
-          console.log(`<${call.name} ${msg}`);
+          const elapsedMs = Date.now() - startedAt;
+          console.log(
+            `${prefix} done in ${elapsedMs}ms with ERROR: ${clip(oneLine(msg))}`
+          );
         } else {
           const result = await tool.execute(call.args);
           results.push(result);
-          console.log(`<${call.name} ${formatToolResult(result)}`);
+          const elapsedMs = Date.now() - startedAt;
+          console.log(
+            `${prefix} done in ${elapsedMs}ms: ${formatToolResult(result)}`
+          );
         }
       } catch (err) {
         const msg = `Tool error: ${formatErrorMessage(err)}`;
         results.push(msg);
-        console.log(`<${call.name} ${clip(oneLine(msg))}`);
+        const elapsedMs = Date.now() - startedAt;
+        console.log(
+          `${prefix} done in ${elapsedMs}ms with ERROR: ${clip(oneLine(msg))}`
+        );
       }
     }
 

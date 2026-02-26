@@ -297,8 +297,9 @@ redeploy_remote() {
     source /etc/brian/env
     set +a
     REPO_DIR=/home/brian/brian
-    cd \"\$REPO_DIR\"
-    brian sync --force
+    git -C \"\$REPO_DIR\" fetch upstream --prune
+    git -C \"\$REPO_DIR\" checkout main
+    git -C \"\$REPO_DIR\" reset --hard upstream/main
     git -C \"\$REPO_DIR\" clean -fd
     cd \"\$REPO_DIR\"
     npm install

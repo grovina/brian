@@ -1,7 +1,7 @@
 import path from "path";
 import { homedir } from "os";
 import { Brian } from "./brian.js";
-import { bash, wait } from "./tools/index.js";
+import { bash, wait, cursor_agent } from "./tools/index.js";
 import { createModel } from "./model.js";
 
 const name = process.env.BRIAN_NAME;
@@ -15,7 +15,7 @@ const stateDir = process.env.BRIAN_STATE_DIR ?? path.join(homedir(), ".brian");
 const brian = new Brian({
   name,
   model: await createModel(),
-  tools: [bash, wait],
+  tools: [bash, wait, cursor_agent],
   stateDir,
   slack: process.env.SLACK_TOKEN
     ? { token: process.env.SLACK_TOKEN }

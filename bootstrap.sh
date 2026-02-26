@@ -306,7 +306,7 @@ redeploy_remote() {
     brian config check
   '"
   if [[ "\$reset_state" == "true" ]]; then
-    remote_cmd "sudo -u brian bash -lc 'rm -f /home/brian/.brian/conversation.json /home/brian/.brian/slack-cursors.json && : > /home/brian/.brian/memory.md'"
+    remote_cmd "sudo -u brian bash -lc 'rm -rf /home/brian/.brian && mkdir -p /home/brian/.brian/logs /home/brian/.brian/context'"
   fi
   remote_cmd "sudo systemctl restart brian && systemctl is-active brian"
 }
@@ -342,7 +342,7 @@ case "\$cmd" in
   redeploy)
     reset_state=false
     if [[ "\${2:-}" == "--state" ]]; then
-      echo "This will clear conversation, memory, and slack cursors for '\$VM' after redeploy."
+      echo "This will fully reset /home/brian/.brian for '\$VM' after redeploy."
       printf "Type RESET to confirm: "
       read -r confirm < /dev/tty
       if [[ "\$confirm" != "RESET" ]]; then

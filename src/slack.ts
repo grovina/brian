@@ -18,6 +18,7 @@ interface SlackMessage {
   channel: string;
   channelName: string;
   images?: ImageData[];
+  attachmentNotes?: string[];
 }
 
 interface ChannelInfo {
@@ -28,6 +29,23 @@ interface ChannelInfo {
 
 const DEFAULT_POLL_INTERVAL_MS = 30_000;
 const MAX_IMAGE_BYTES = 1024 * 1024; // 1MB
+const ALLOWED_IMAGE_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+]);
+
+function summarizeTextPayload(raw: string, maxLen = 220): string {
+  const text = raw
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return "";
+  return text.length > maxLen ? `${text.slice(0, maxLen)}...` : text;
+}
 
 export class Slack {
   private client: WebClient;
@@ -143,6 +161,11 @@ export class Slack {
         const prefix = msg.threadTs ? "  ↳ " : "- ";
         lines.push(`${prefix}${userName} (${time}): ${msg.text}`);
         if (msg.images) allImages.push(...msg.images);
+        if (msg.attachmentNotes && msg.attachmentNotes.length > 0) {
+          for (const note of msg.attachmentNotes) {
+            lines.push(`    ${note}`);
+          }
+        }
       }
     }
 
@@ -200,7 +223,7 @@ export class Slack {
           continue;
         if (oldest && msg.ts === oldest) continue;
 
-        const images = await this.extractImages(msg);
+        const attachments = await this.extractImages(msg);
         messages.push({
           user: msg.user ?? "unknown",
           text: msg.text,
@@ -210,7 +233,8 @@ export class Slack {
           channelName: channel.isDm
             ? await this.resolveUser(msg.user ?? "unknown")
             : channel.name,
-          images,
+          images: attachments.images,
+          attachmentNotes: attachments.notes,
         });
 
         if (msg.thread_ts && msg.reply_count) {
@@ -248,7 +272,7 @@ export class Slack {
           if (!msg.ts || !msg.text) continue;
           if (msg.ts === lastTs || msg.ts === threadTs) continue;
 
-          const images = await this.extractImages(msg);
+          const attachments = await this.extractImages(msg);
           messages.push({
             user: msg.user ?? "unknown",
             text: msg.text,
@@ -256,7 +280,8 @@ export class Slack {
             threadTs,
             channel,
             channelName: channel,
-            images,
+            images: attachments.images,
+            attachmentNotes: attachments.notes,
           });
         }
 
@@ -272,35 +297,103 @@ export class Slack {
     return messages;
   }
 
-  private async extractImages(msg: any): Promise<ImageData[] | undefined> {
+  private async extractImages(
+    msg: any
+  ): Promise<{ images?: ImageData[]; notes: string[] }> {
     const images: ImageData[] = [];
+    const notes: string[] = [];
 
     for (const file of msg.files ?? []) {
       if (!file.mimetype?.startsWith("image/")) continue;
       if ((file.size ?? 0) > MAX_IMAGE_BYTES * 5) continue;
 
-      const url = file.url_private;
-      if (!url) continue;
+      const label = file.name ?? file.id ?? "image";
+      const url = file.url_private_download ?? file.url_private;
+      if (!url) {
+        notes.push(`- attachment ${label} unavailable (missing private download URL)`);
+        continue;
+      }
 
+      let response: Response;
       try {
-        const response = await fetch(url, {
+        response = await fetch(url, {
           headers: { Authorization: `Bearer ${this.client.token}` },
         });
-        if (!response.ok) continue;
-
-        const buffer = Buffer.from(await response.arrayBuffer());
-        if (buffer.length > MAX_IMAGE_BYTES) continue;
-
-        images.push({
-          mimeType: file.mimetype,
-          data: buffer.toString("base64"),
-        });
-      } catch {
-        // skip undownloadable images
+      } catch (err) {
+        notes.push(`- attachment ${label} unavailable (${(err as Error).message})`);
+        continue;
       }
+
+      if (!response.ok) {
+        notes.push(
+          `- attachment ${label} unavailable (download failed: HTTP ${response.status})`
+        );
+        continue;
+      }
+
+      const responseMime =
+        response.headers.get("content-type")?.split(";")[0].trim() ?? "";
+      if (responseMime && !responseMime.startsWith("image/")) {
+        let payloadSnippet = "";
+        if (responseMime.startsWith("text/")) {
+          const body = await response.text();
+          const summary = summarizeTextPayload(body);
+          if (summary) payloadSnippet = ` | payload: ${summary}`;
+        }
+        notes.push(
+          `- attachment ${label} unavailable (download returned ${responseMime}, expected image${payloadSnippet})`
+        );
+        continue;
+      }
+
+      const buffer = Buffer.from(await response.arrayBuffer());
+      if (buffer.length === 0) {
+        notes.push(`- attachment ${label} unavailable (empty payload)`);
+        continue;
+      }
+      if (buffer.length > MAX_IMAGE_BYTES) {
+        notes.push(
+          `- attachment ${label} unavailable (image too large: ${Math.round(buffer.length / 1024)}KB)`
+        );
+        continue;
+      }
+
+      const maybeHtml = buffer
+        .subarray(0, 80)
+        .toString("utf8")
+        .trimStart()
+        .toLowerCase();
+      if (
+        maybeHtml.startsWith("<!doctype html") ||
+        maybeHtml.startsWith("<html") ||
+        maybeHtml.startsWith("<a href")
+      ) {
+        const summary = summarizeTextPayload(buffer.toString("utf8"));
+        const payloadSnippet = summary ? ` | payload: ${summary}` : "";
+        notes.push(
+          `- attachment ${label} unavailable (payload is HTML, expected image${payloadSnippet})`
+        );
+        continue;
+      }
+
+      const effectiveMime =
+        responseMime && responseMime.startsWith("image/")
+          ? responseMime
+          : (file.mimetype ?? "").split(";")[0].trim();
+      if (!ALLOWED_IMAGE_MIME_TYPES.has(effectiveMime)) {
+        notes.push(
+          `- attachment ${label} unavailable (unsupported image type ${effectiveMime || "unknown"})`
+        );
+        continue;
+      }
+
+      images.push({
+        mimeType: effectiveMime,
+        data: buffer.toString("base64"),
+      });
     }
 
-    return images.length > 0 ? images : undefined;
+    return { images: images.length > 0 ? images : undefined, notes };
   }
 
   private async resolveUser(userId: string): Promise<string> {

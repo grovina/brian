@@ -256,19 +256,23 @@ async function handleSync(args: string[]): Promise<void> {
 
   console.log("Syncing fork with upstream...");
   try {
+    execFileSync("git", ["-C", ctx.repoDir, "fetch", "upstream"], {
+      stdio: "inherit",
+    });
+
     if (force) {
-      console.log("Force mode: discarding local working tree changes...");
-      execFileSync("git", ["-C", ctx.repoDir, "reset", "--hard"], {
+      console.log("Force mode: aligning local main to upstream/main...");
+      execFileSync("git", ["-C", ctx.repoDir, "reset", "--hard", "upstream/main"], {
         stdio: "inherit",
       });
       execFileSync("git", ["-C", ctx.repoDir, "clean", "-fd"], {
         stdio: "inherit",
       });
+      console.log("✓ Fork synced (forced)");
+      console.log(await syncStatus(ctx));
+      return;
     }
 
-    execFileSync("git", ["-C", ctx.repoDir, "fetch", "upstream"], {
-      stdio: "inherit",
-    });
     execFileSync(
       "git",
       ["-C", ctx.repoDir, "merge", "upstream/main", "--ff-only"],

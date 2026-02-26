@@ -95,9 +95,18 @@ export class Agent {
 
     const toolDefs = this.config.tools.map((t) => t.definition);
 
+    const startupUpdates = this.config.updates.drain();
+    const startupText = `[Agent started at ${formatTime()} — first turn after startup]`;
     this.history.push({
       role: "user",
-      text: `[${formatTime()}]`,
+      text:
+        startupUpdates.length > 0
+          ? `${startupText}\n\n${formatUpdates(startupUpdates)}`
+          : startupText,
+      images:
+        startupUpdates.length > 0
+          ? collectImages(startupUpdates)
+          : undefined,
     });
 
     while (true) {

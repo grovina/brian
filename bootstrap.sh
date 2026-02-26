@@ -306,7 +306,7 @@ redeploy_remote() {
     brian config check
   '"
   if [[ "\$reset_state" == "true" ]]; then
-    remote_cmd "sudo -u brian bash -lc 'rm -rf /home/brian/.brian && mkdir -p /home/brian/.brian/logs /home/brian/.brian/context'"
+    remote_cmd "sudo -u brian bash -lc 'rm -rf /home/brian/.brian && mkdir -p /home/brian/.brian/logs'"
   fi
   remote_cmd "sudo systemctl restart brian && systemctl is-active brian"
 }
@@ -327,7 +327,7 @@ USAGE
 cmd="\${1:-help}"
 case "\$cmd" in
   status)
-    remote_cmd "systemctl is-active brian; echo '---'; sudo -u brian -H brian sync --check; echo '---'; sudo -u brian cat /home/brian/.brian/context/fork-status.md"
+    remote_cmd "systemctl is-active brian; echo '---'; sudo -u brian -H brian sync --check"
     ;;
   logs)
     gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "journalctl -u brian -n 200 -f --no-pager" < /dev/null

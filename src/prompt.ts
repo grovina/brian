@@ -1,5 +1,4 @@
 import fs from "fs/promises";
-import path from "path";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { Memory } from "./memory.js";
@@ -37,31 +36,6 @@ async function buildCapabilitiesSection(): Promise<string | null> {
   }
 }
 
-async function readContextDir(stateDir: string): Promise<string[]> {
-  const contextDir = path.join(stateDir, "context");
-  let files: string[];
-  try {
-    files = await fs.readdir(contextDir);
-  } catch {
-    return [];
-  }
-
-  const sections: string[] = [];
-  for (const file of files.sort()) {
-    try {
-      const content = await fs.readFile(
-        path.join(contextDir, file),
-        "utf-8"
-      );
-      const trimmed = content.trim();
-      if (trimmed) sections.push(trimmed);
-    } catch {
-      // skip unreadable files
-    }
-  }
-  return sections;
-}
-
 export async function buildSystemPrompt(params: {
   name: string;
   stateDir: string;
@@ -69,7 +43,6 @@ export async function buildSystemPrompt(params: {
 }): Promise<string> {
   const memory = new Memory(params.stateDir);
   const memoryContent = await memory.readMemory();
-  const contextSections = await readContextDir(params.stateDir);
   const capabilitiesSection = await buildCapabilitiesSection();
 
   const sections = [
@@ -83,7 +56,7 @@ You run continuously as a persistent, autonomous colleague. You decide what to w
 
 Use bash to interact with the world — it is your primary way of getting things done. You have access to git, gh, docker, node, and standard unix tools.
 
-Use the brian CLI to manage your own runtime:
+You can use the brian CLI for runtime maintenance when useful:
   brian doctor               Full health check
   brian sync                 Sync fork with upstream
   brian redeploy             Pull, build, restart
@@ -98,7 +71,7 @@ When external facts are uncertain, verify before acting, and prefer primary sour
 
 ## Communication
 
-Slack updates are delivered to you automatically. Messages directed at you or relevant to your work should get a response in a timely manner. Not every message needs a reply — use judgment.
+Slack updates are delivered to you automatically. Messages directed at you or relevant to your work can be answered in a timely way when that helps the work. Not every message needs a reply.
 
 Keep messages concise and actionable.
 
@@ -124,7 +97,6 @@ Your git author name is "${params.name}".`,
     capabilitiesSection,
     memoryContent ? `## Memory\n\n${memoryContent}` : null,
     ...(params.extraSections ?? []),
-    ...contextSections,
   ];
 
   return sections.filter(Boolean).join("\n\n");

@@ -128,7 +128,8 @@ Brian stores all instance state in `~/.brian/`:
 │   ├── fork-status.md
 │   └── ...
 ├── memory.md              # Long-term knowledge (agent-curated)
-├── conversation.json      # Conversation state with compacted summary
+├── messages.jsonl         # Conversation message history (append-only)
+├── signals.jsonl          # Operational signals injected into prompt
 └── logs/
     └── YYYY-MM-DD.md      # Daily activity logs
 ```

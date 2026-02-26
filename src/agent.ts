@@ -10,6 +10,8 @@ import type {
 import { buildSystemPrompt } from "./prompt.js";
 import { UpdateQueue, formatUpdates, collectImages } from "./updates.js";
 import { Memory } from "./memory.js";
+import { SignalStore, formatSignalSection } from "./signals.js";
+import { MessageStore } from "./messages.js";
 
 const MAX_TURNS_PER_CYCLE = 200;
 const MAX_RETRIES = 3;
@@ -42,14 +44,6 @@ function sanitizeHistory(messages: Message[]): Message[] {
   return messages.slice(start);
 }
 
-function stripImages(messages: Message[]): Message[] {
-  return messages.map((msg) => ({
-    ...msg,
-    images: undefined,
-    toolResults: msg.toolResults?.map((tr) => ({ ...tr, images: undefined })),
-  }));
-}
-
 function currentTime(): string {
   return new Date().toLocaleString("en-GB", {
     weekday: "short",
@@ -64,12 +58,15 @@ export class Agent {
   private history: Message[] = [];
   private config: AgentConfig;
   private toolMap: Map<string, Tool>;
-  private stateFile: string;
+  private signalStore: SignalStore;
+  private messageStore: MessageStore;
+  private persistedMessageCount = 0;
 
   constructor(config: AgentConfig) {
     this.config = config;
     this.toolMap = new Map(config.tools.map((t) => [t.name, t]));
-    this.stateFile = path.join(config.stateDir, "conversation.json");
+    this.signalStore = new SignalStore(config.stateDir);
+    this.messageStore = new MessageStore(config.stateDir);
   }
 
   async loop(): Promise<never> {
@@ -84,10 +81,16 @@ export class Agent {
     });
 
     while (true) {
+      const signalSection = formatSignalSection(
+        await this.signalStore.readRecent(12)
+      );
       const systemPrompt = await buildSystemPrompt({
         name: this.config.name,
         stateDir: this.config.stateDir,
-        extraSections: this.config.extraPromptSections,
+        extraSections: [
+          ...(this.config.extraPromptSections ?? []),
+          ...(signalSection ? [signalSection] : []),
+        ],
       });
 
       const startTime = Date.now();
@@ -108,6 +111,9 @@ export class Agent {
         const pending = this.config.updates.drain();
         const updateText = pending.length > 0 ? formatUpdates(pending) : undefined;
         const updateImages = collectImages(pending);
+        for (const update of pending) {
+          await this.signalStore.append(update.content, update.timestamp);
+        }
 
         this.history.push({
           role: "user",
@@ -122,6 +128,9 @@ export class Agent {
       } else {
         // Model produced text without tool calls — inject updates or time marker
         const pending = this.config.updates.drain();
+        for (const update of pending) {
+          await this.signalStore.append(update.content, update.timestamp);
+        }
         this.history.push({
           role: "user",
           text: pending.length > 0 ? formatUpdates(pending) : `[${currentTime()}]`,
@@ -129,8 +138,8 @@ export class Agent {
         turnsSinceWait = 0;
       }
 
-      this.trimHistory();
       await this.saveHistory();
+      this.trimHistory();
 
       await this.logStats({
         tokensIn: response.usage?.inputTokens ?? 0,
@@ -197,14 +206,10 @@ export class Agent {
   private async loadHistory(): Promise<void> {
     try {
       await fs.mkdir(this.config.stateDir, { recursive: true });
-      const data = await fs.readFile(this.stateFile, "utf-8");
-      const state = JSON.parse(data);
-      const trimmed = (state.messages as Message[]).slice(
-        -MAX_HISTORY_MESSAGES
-      );
-      this.history = sanitizeHistory(trimmed);
+      this.history = await this.messageStore.loadRecent(MAX_HISTORY_MESSAGES);
+      this.persistedMessageCount = this.history.length;
       console.log(
-        `Restored ${this.history.length} messages from conversation`
+        `Restored ${this.history.length} messages from history`
       );
     } catch {
       console.log("Starting fresh conversation");
@@ -213,15 +218,9 @@ export class Agent {
 
   private async saveHistory(): Promise<void> {
     try {
-      await fs.mkdir(this.config.stateDir, { recursive: true });
-      const toSave = stripImages(
-        this.history.slice(-MAX_HISTORY_MESSAGES)
-      );
-      const clean = sanitizeHistory(toSave);
-      await fs.writeFile(
-        this.stateFile,
-        JSON.stringify({ messages: clean }, null, 2)
-      );
+      const newMessages = this.history.slice(this.persistedMessageCount);
+      await this.messageStore.appendMany(newMessages);
+      this.persistedMessageCount = this.history.length;
     } catch (err) {
       console.error("Failed to save conversation state:", err);
     }
@@ -232,6 +231,9 @@ export class Agent {
       this.history = sanitizeHistory(
         this.history.slice(-MAX_HISTORY_MESSAGES)
       );
+    }
+    if (this.persistedMessageCount > this.history.length) {
+      this.persistedMessageCount = this.history.length;
     }
   }
 

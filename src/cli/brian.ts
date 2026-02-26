@@ -52,7 +52,6 @@ async function handleSetup(): Promise<void> {
   const ctx = resolveContext();
 
   console.log("Initializing state directory...");
-  await fs.mkdir(resolve(ctx.stateDir, "context"), { recursive: true });
   await fs.mkdir(resolve(ctx.stateDir, "logs"), { recursive: true });
 
   await installService(name, ctx.repoDir);
@@ -204,11 +203,7 @@ async function runGit(dir: string, args: string[]): Promise<string> {
   return stdout.trim();
 }
 
-async function syncCheck(ctx: Context): Promise<void> {
-  const contextDir = resolve(ctx.stateDir, "context");
-  await fs.mkdir(contextDir, { recursive: true });
-  const statusFile = resolve(contextDir, "fork-status.md");
-
+async function syncStatus(ctx: Context): Promise<string> {
   try {
     await runGit(ctx.repoDir, ["fetch", "--all", "--prune"]);
 
@@ -232,24 +227,20 @@ async function syncCheck(ctx: Context): Promise<void> {
     const behind = parseInt(behindRaw ?? "0", 10) || 0;
 
     const now = new Date().toISOString();
-    let status = `## Fork Status\n\nChecked: ${now}\n`;
+    let status = `Fork status (checked ${now})`;
 
     if (behind > 0) {
-      status += `\nFork is **${behind} commits behind** ${upstream}/${branch}. Consider syncing: \`brian sync\`\n`;
+      status += `\n- Behind ${upstream}/${branch} by ${behind} commits`;
     }
     if (ahead > 0) {
-      status += `\nFork is **${ahead} commits ahead** of ${upstream}/${branch}. Consider opening a PR to upstream.\n`;
+      status += `\n- Ahead of ${upstream}/${branch} by ${ahead} commits`;
     }
     if (ahead === 0 && behind === 0) {
-      status += `\nFork is up to date with ${upstream}/${branch}.\n`;
+      status += `\n- Up to date with ${upstream}/${branch}`;
     }
-
-    await fs.writeFile(statusFile, status);
+    return status;
   } catch (err) {
-    await fs.writeFile(
-      statusFile,
-      `## Fork Status\n\nCheck failed: ${(err as Error).message}\n`
-    );
+    return `Fork status check failed: ${(err as Error).message}`;
   }
 }
 
@@ -259,8 +250,7 @@ async function handleSync(args: string[]): Promise<void> {
 
   if (args.includes("--check")) {
     console.log("Checking fork status...");
-    await syncCheck(ctx);
-    console.log("✓ Status written to context/fork-status.md");
+    console.log(await syncStatus(ctx));
     return;
   }
 
@@ -285,8 +275,7 @@ async function handleSync(args: string[]): Promise<void> {
       { stdio: "inherit" }
     );
     console.log("✓ Fork synced");
-
-    await syncCheck(ctx);
+    console.log(await syncStatus(ctx));
   } catch {
     console.error(
       "✗ Sync failed — may need manual merge. Try: git -C " +

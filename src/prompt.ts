@@ -1,6 +1,41 @@
 import fs from "fs/promises";
 import path from "path";
+import { execFile } from "child_process";
+import { promisify } from "util";
 import { Memory } from "./memory.js";
+
+const execFileAsync = promisify(execFile);
+let cachedCapabilitiesSection: string | null | undefined;
+
+async function buildCapabilitiesSection(): Promise<string | null> {
+  if (cachedCapabilitiesSection !== undefined) return cachedCapabilitiesSection;
+
+  const candidates = ["gh", "cursor", "claude", "docker"];
+  try {
+    const { stdout } = await execFileAsync(
+      "bash",
+      [
+        "-lc",
+        `for t in ${candidates.join(" ")}; do command -v "$t" >/dev/null && echo "$t"; done`,
+      ],
+      { timeout: 2000 }
+    );
+
+    const installed = stdout
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    cachedCapabilitiesSection =
+      installed.length > 0
+        ? `## Available CLIs\n\nInstalled and available via bash: ${installed.join(", ")}.`
+        : null;
+    return cachedCapabilitiesSection;
+  } catch {
+    cachedCapabilitiesSection = null;
+    return cachedCapabilitiesSection;
+  }
+}
 
 async function readContextDir(stateDir: string): Promise<string[]> {
   const contextDir = path.join(stateDir, "context");
@@ -35,6 +70,7 @@ export async function buildSystemPrompt(params: {
   const memory = new Memory(params.stateDir);
   const memoryContent = await memory.readMemory();
   const contextSections = await readContextDir(params.stateDir);
+  const capabilitiesSection = await buildCapabilitiesSection();
 
   const sections = [
     `You are ${params.name}, an autonomous AI coworker.
@@ -85,6 +121,7 @@ Your git author name is "${params.name}".`,
 - Working directory: ${process.cwd()}
 - State: ${params.stateDir}`,
 
+    capabilitiesSection,
     memoryContent ? `## Memory\n\n${memoryContent}` : null,
     ...(params.extraSections ?? []),
     ...contextSections,

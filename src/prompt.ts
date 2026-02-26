@@ -52,6 +52,10 @@ Use the brian CLI to manage your own runtime:
   brian sync                 Sync fork with upstream
   brian redeploy             Pull, build, restart
 
+## Knowledge
+
+Your training data has a cutoff. If info contradicts your knowledge (e.g., a newer tool version or model), trust external evidence or user input. Use tools to verify facts when in doubt.
+
 ## Verification
 
 When external facts are uncertain, verify before acting, and prefer primary sources over assumptions or stale memory.

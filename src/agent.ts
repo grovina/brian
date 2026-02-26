@@ -11,7 +11,7 @@ import { buildSystemPrompt } from "./prompt.js";
 import { UpdateQueue, formatUpdates, collectImages } from "./updates.js";
 import { Memory } from "./memory.js";
 import { SignalStore, formatSignalSection } from "./signals.js";
-import { MessageStore } from "./messages.js";
+import { TurnStore } from "./turns.js";
 
 const MAX_TURNS_PER_CYCLE = 200;
 const MAX_RETRIES = 3;
@@ -24,6 +24,13 @@ interface AgentConfig {
   tools: Tool[];
   updates: UpdateQueue;
   extraPromptSections?: string[];
+}
+
+interface TurnInput {
+  systemPrompt: string;
+  messages: Message[];
+  tools: ToolDefinition[];
+  signalSection: string | null;
 }
 
 function sanitizeHistory(messages: Message[]): Message[] {
@@ -59,14 +66,14 @@ export class Agent {
   private config: AgentConfig;
   private toolMap: Map<string, Tool>;
   private signalStore: SignalStore;
-  private messageStore: MessageStore;
-  private persistedMessageCount = 0;
+  private turnStore: TurnStore;
+  private turnSeq = 0;
 
   constructor(config: AgentConfig) {
     this.config = config;
     this.toolMap = new Map(config.tools.map((t) => [t.name, t]));
     this.signalStore = new SignalStore(config.stateDir);
-    this.messageStore = new MessageStore(config.stateDir);
+    this.turnStore = new TurnStore(config.stateDir);
   }
 
   async loop(): Promise<never> {
@@ -81,20 +88,21 @@ export class Agent {
     });
 
     while (true) {
-      const signalSection = formatSignalSection(
-        await this.signalStore.readRecent(12)
-      );
-      const systemPrompt = await buildSystemPrompt({
-        name: this.config.name,
-        stateDir: this.config.stateDir,
-        extraSections: [
-          ...(this.config.extraPromptSections ?? []),
-          ...(signalSection ? [signalSection] : []),
-        ],
+      const turnInput = await this.buildTurnInput(toolDefs);
+      const turnId = ++this.turnSeq;
+      await this.turnStore.appendRequest({
+        turnId,
+        provider: process.env.MODEL_PROVIDER ?? null,
+        modelId: process.env.MODEL_ID ?? null,
+        input: turnInput,
       });
 
       const startTime = Date.now();
-      const response = await this.callWithRetry(systemPrompt, toolDefs);
+      const response = await this.callWithRetry(turnInput);
+      await this.turnStore.appendResponse({
+        turnId,
+        response,
+      });
       const metadata =
         Array.isArray(response.metadata) && response.metadata.length === 0
           ? undefined
@@ -148,7 +156,6 @@ export class Agent {
         turnsSinceWait = 0;
       }
 
-      await this.saveHistory();
       this.trimHistory();
 
       await this.logStats({
@@ -163,17 +170,36 @@ export class Agent {
     }
   }
 
+  private async buildTurnInput(tools: ToolDefinition[]): Promise<TurnInput> {
+    const signalSection = formatSignalSection(
+      await this.signalStore.readRecent(12)
+    );
+    const systemPrompt = await buildSystemPrompt({
+      name: this.config.name,
+      stateDir: this.config.stateDir,
+      extraSections: [
+        ...(this.config.extraPromptSections ?? []),
+        ...(signalSection ? [signalSection] : []),
+      ],
+    });
+    return {
+      systemPrompt,
+      messages: this.history,
+      tools,
+      signalSection,
+    };
+  }
+
   private async callWithRetry(
-    systemPrompt: string,
-    tools: ToolDefinition[]
+    input: TurnInput
   ) {
     let lastError: Error | null = null;
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       try {
         return await this.config.model.generate({
-          systemPrompt,
-          messages: this.history,
-          tools,
+          systemPrompt: input.systemPrompt,
+          messages: input.messages,
+          tools: input.tools,
         });
       } catch (err) {
         lastError = err as Error;
@@ -215,24 +241,16 @@ export class Agent {
 
   private async loadHistory(): Promise<void> {
     try {
-      await fs.mkdir(this.config.stateDir, { recursive: true });
-      this.history = await this.messageStore.loadRecent(MAX_HISTORY_MESSAGES);
-      this.persistedMessageCount = this.history.length;
+      const restored = await this.turnStore.restoreRecentMessages(
+        MAX_HISTORY_MESSAGES
+      );
+      this.history = restored.messages;
+      this.turnSeq = restored.maxTurnId;
       console.log(
-        `Restored ${this.history.length} messages from history`
+        `Restored ${this.history.length} messages from turns`
       );
     } catch {
       console.log("Starting fresh conversation");
-    }
-  }
-
-  private async saveHistory(): Promise<void> {
-    try {
-      const newMessages = this.history.slice(this.persistedMessageCount);
-      await this.messageStore.appendMany(newMessages);
-      this.persistedMessageCount = this.history.length;
-    } catch (err) {
-      console.error("Failed to save conversation state:", err);
     }
   }
 
@@ -241,9 +259,6 @@ export class Agent {
       this.history = sanitizeHistory(
         this.history.slice(-MAX_HISTORY_MESSAGES)
       );
-    }
-    if (this.persistedMessageCount > this.history.length) {
-      this.persistedMessageCount = this.history.length;
     }
   }
 

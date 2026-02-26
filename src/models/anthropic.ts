@@ -80,35 +80,59 @@ export class AnthropicModel implements ModelProvider {
     for (const msg of messages) {
       if (msg.role === "user") {
         if (msg.toolResults && msg.toolResults.length > 0) {
-          const content: Anthropic.ToolResultBlockParam[] =
-            msg.toolResults.map((tr) => {
-              if (tr.images && tr.images.length > 0) {
-                return {
-                  type: "tool_result" as const,
-                  tool_use_id: tr.toolCallId,
-                  content: [
-                    { type: "text" as const, text: tr.result },
-                    ...tr.images.map((img) => ({
-                      type: "image" as const,
-                      source: {
-                        type: "base64" as const,
-                        media_type: img.mimeType as
-                          | "image/jpeg"
-                          | "image/png"
-                          | "image/gif"
-                          | "image/webp",
-                        data: img.data,
-                      },
-                    })),
-                  ],
-                };
-              }
+          const content: (
+            | Anthropic.ToolResultBlockParam
+            | Anthropic.TextBlockParam
+            | Anthropic.ImageBlockParam
+          )[] = msg.toolResults.map((tr) => {
+            if (tr.images && tr.images.length > 0) {
               return {
                 type: "tool_result" as const,
                 tool_use_id: tr.toolCallId,
-                content: tr.result,
+                content: [
+                  { type: "text" as const, text: tr.result },
+                  ...tr.images.map((img) => ({
+                    type: "image" as const,
+                    source: {
+                      type: "base64" as const,
+                      media_type: img.mimeType as
+                        | "image/jpeg"
+                        | "image/png"
+                        | "image/gif"
+                        | "image/webp",
+                      data: img.data,
+                    },
+                  })),
+                ],
               };
-            });
+            }
+            return {
+              type: "tool_result" as const,
+              tool_use_id: tr.toolCallId,
+              content: tr.result,
+            };
+          });
+
+          if (msg.text) {
+            content.push({ type: "text", text: msg.text });
+          }
+          if (msg.images) {
+            for (const img of msg.images) {
+              content.push({
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: img.mimeType as
+                    | "image/jpeg"
+                    | "image/png"
+                    | "image/gif"
+                    | "image/webp",
+                  data: img.data,
+                },
+              });
+            }
+          }
+
           result.push({ role: "user", content });
         } else {
           const content: Anthropic.ContentBlockParam[] = [];

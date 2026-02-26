@@ -4,14 +4,20 @@ import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import fs from "fs/promises";
 import { execFileSync, execSync } from "child_process";
-import { registry, getModule, type CheckResult } from "../modules/index.js";
-import { syncCheck } from "../modules/updater/index.js";
-import type { InstallContext } from "../modules/types.js";
+import { promisify } from "util";
+import { execFile } from "child_process";
 import { checkModelConfig } from "../model.js";
+
+const execFileAsync = promisify(execFile);
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-function resolveContext(): InstallContext {
+interface Context {
+  repoDir: string;
+  stateDir: string;
+}
+
+function resolveContext(): Context {
   const home = process.env.HOME ?? "/home/brian";
   return {
     repoDir: process.env.BRIAN_REPO_DIR ?? resolve(__dirname, "../.."),
@@ -23,13 +29,9 @@ function printUsage(): void {
   console.log(`brian — manage your brian instance
 
 Commands:
-  setup                       Initialize state, install modules, start daemon
+  setup                       Initialize state and start daemon
   redeploy                    Pull, build, restart (with rollback)
   config check                Validate runtime config and model connectivity
-  module list                 List available modules
-  module install <name>       Install a module
-  module check [name]         Check module status
-  module help <name>          Show module usage guide
   doctor                      Run all health checks
   sync [--force]              Sync fork with upstream
   sync --check                Check fork status only
@@ -50,18 +52,8 @@ async function handleSetup(): Promise<void> {
   const ctx = resolveContext();
 
   console.log("Initializing state directory...");
-  await fs.mkdir(resolve(ctx.stateDir, "mcp"), { recursive: true });
   await fs.mkdir(resolve(ctx.stateDir, "context"), { recursive: true });
-
-  console.log("Installing default modules...");
-  for (const mod of registry.filter((m) => m.meta.default)) {
-    try {
-      await mod.install(ctx);
-      console.log(`  ✓ ${mod.meta.name}`);
-    } catch (err) {
-      console.error(`  ✗ ${mod.meta.name}: ${err}`);
-    }
-  }
+  await fs.mkdir(resolve(ctx.stateDir, "logs"), { recursive: true });
 
   await installService(name, ctx.repoDir);
 
@@ -116,105 +108,6 @@ WantedBy=multi-user.target
       "Systemd not available — start manually: node dist/start.js"
     );
   }
-}
-
-// ─────────────────────────────────────────────────
-// module
-// ─────────────────────────────────────────────────
-
-async function handleModuleList(): Promise<void> {
-  const ctx = resolveContext();
-
-  for (const mod of registry) {
-    const result = await mod.check(ctx).catch((): CheckResult => ({
-      installed: false,
-      issues: ["check failed"],
-    }));
-    if (result.installed) {
-      const ver = result.version ? ` (${result.version})` : "";
-      console.log(
-        `  ✓  ${mod.meta.id.padEnd(12)} ${mod.meta.description}${ver}`
-      );
-    } else {
-      const hint = result.issues?.[0] ?? "not installed";
-      console.log(
-        `  ·  ${mod.meta.id.padEnd(12)} ${hint} — run: brian module install ${mod.meta.id}`
-      );
-    }
-  }
-}
-
-async function handleModuleInstall(name: string): Promise<void> {
-  const mod = getModule(name);
-  if (!mod) {
-    console.error(
-      `Unknown module: ${name}\nAvailable: ${registry.map((m) => m.meta.id).join(", ")}`
-    );
-    process.exit(1);
-  }
-
-  const ctx = resolveContext();
-
-  try {
-    await mod.install(ctx);
-    const result = await mod.check(ctx);
-    if (result.installed) {
-      const ver = result.version ? ` (${result.version})` : "";
-      console.log(`✓ ${mod.meta.name} installed${ver}`);
-      console.log(`  Use: ${mod.meta.usage}`);
-      console.log(`  More: brian module help ${mod.meta.id}`);
-    } else {
-      console.log(`⚠ ${mod.meta.name} not ready after install`);
-      for (const issue of result.issues ?? []) {
-        console.log(`  → ${issue}`);
-      }
-      console.log(`  See: brian module help ${mod.meta.id}`);
-    }
-  } catch (err) {
-    console.error(`✗ ${mod.meta.name} install failed: ${err}`);
-    console.error(`  Retry: brian module install ${mod.meta.id}`);
-    process.exit(1);
-  }
-}
-
-async function handleModuleCheck(name?: string): Promise<void> {
-  const ctx = resolveContext();
-  const modules = name ? [getModule(name)].filter(Boolean) : registry;
-
-  if (name && modules.length === 0) {
-    console.error(`Unknown module: ${name}`);
-    process.exit(1);
-  }
-
-  for (const mod of modules) {
-    if (!mod) continue;
-    try {
-      const result = await mod.check(ctx);
-      if (result.installed) {
-        const ver = result.version ? ` (${result.version})` : "";
-        console.log(`✓ ${mod.meta.name}${ver}`);
-      } else {
-        console.log(`✗ ${mod.meta.name}`);
-        for (const issue of result.issues ?? []) {
-          console.log(`  → ${issue}`);
-        }
-        console.log(`  Install: brian module install ${mod.meta.id}`);
-      }
-    } catch (err) {
-      console.log(`✗ ${mod.meta.name}: check failed — ${err}`);
-    }
-  }
-}
-
-async function handleModuleHelp(name: string): Promise<void> {
-  const mod = getModule(name);
-  if (!mod) {
-    console.error(
-      `Unknown module: ${name}\nAvailable: ${registry.map((m) => m.meta.id).join(", ")}`
-    );
-    process.exit(1);
-  }
-  console.log(mod.meta.help);
 }
 
 // ─────────────────────────────────────────────────
@@ -276,9 +169,88 @@ async function handleDoctor(): Promise<void> {
   console.log(`${name} @ ${project}`);
   console.log(`  Model: ${provider}`);
   console.log(`  Config: /etc/brian/env`);
-  console.log(`  To change: edit /etc/brian/env, then brian redeploy`);
   console.log();
-  await handleModuleCheck();
+
+  try {
+    await checkModelConfig();
+    console.log("  ✓ Model connectivity");
+  } catch (err) {
+    console.log(`  ✗ Model: ${(err as Error).message}`);
+  }
+
+  if (process.env.SLACK_TOKEN) {
+    console.log("  ✓ Slack configured");
+  } else {
+    console.log("  · Slack not configured (SLACK_TOKEN not set)");
+  }
+
+  const ctx = resolveContext();
+  try {
+    await execFileAsync("git", ["-C", ctx.repoDir, "rev-parse", "--is-inside-work-tree"], { timeout: 5000 });
+    console.log("  ✓ Git repo");
+  } catch {
+    console.log("  ✗ Not a git repo");
+  }
+}
+
+// ─────────────────────────────────────────────────
+// sync
+// ─────────────────────────────────────────────────
+
+async function runGit(dir: string, args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync("git", ["-C", dir, ...args], {
+    timeout: 15_000,
+  });
+  return stdout.trim();
+}
+
+async function syncCheck(ctx: Context): Promise<void> {
+  const contextDir = resolve(ctx.stateDir, "context");
+  await fs.mkdir(contextDir, { recursive: true });
+  const statusFile = resolve(contextDir, "fork-status.md");
+
+  try {
+    await runGit(ctx.repoDir, ["fetch", "--all", "--prune"]);
+
+    let upstream = "upstream";
+    try {
+      await runGit(ctx.repoDir, ["remote", "get-url", upstream]);
+    } catch {
+      upstream = "origin";
+    }
+
+    const branch = "main";
+    const range = `origin/${branch}...${upstream}/${branch}`;
+    const counts = await runGit(ctx.repoDir, [
+      "rev-list",
+      "--left-right",
+      "--count",
+      range,
+    ]);
+    const [aheadRaw, behindRaw] = counts.split(/\s+/);
+    const ahead = parseInt(aheadRaw ?? "0", 10) || 0;
+    const behind = parseInt(behindRaw ?? "0", 10) || 0;
+
+    const now = new Date().toISOString();
+    let status = `## Fork Status\n\nChecked: ${now}\n`;
+
+    if (behind > 0) {
+      status += `\nFork is **${behind} commits behind** ${upstream}/${branch}. Consider syncing: \`brian sync\`\n`;
+    }
+    if (ahead > 0) {
+      status += `\nFork is **${ahead} commits ahead** of ${upstream}/${branch}. Consider opening a PR to upstream.\n`;
+    }
+    if (ahead === 0 && behind === 0) {
+      status += `\nFork is up to date with ${upstream}/${branch}.\n`;
+    }
+
+    await fs.writeFile(statusFile, status);
+  } catch (err) {
+    await fs.writeFile(
+      statusFile,
+      `## Fork Status\n\nCheck failed: ${(err as Error).message}\n`
+    );
+  }
 }
 
 async function handleSync(args: string[]): Promise<void> {
@@ -346,33 +318,6 @@ async function main(): Promise<void> {
       }
       console.error("Usage: brian config check");
       process.exit(1);
-      break;
-    case "module":
-      switch (subcommand) {
-        case "list":
-          await handleModuleList();
-          break;
-        case "install":
-          if (!rest[0]) {
-            console.error("Usage: brian module install <name>");
-            process.exit(1);
-          }
-          await handleModuleInstall(rest[0]);
-          break;
-        case "check":
-          await handleModuleCheck(rest[0]);
-          break;
-        case "help":
-          if (!rest[0]) {
-            console.error("Usage: brian module help <name>");
-            process.exit(1);
-          }
-          await handleModuleHelp(rest[0]);
-          break;
-        default:
-          console.error("Usage: brian module <list|install|check|help>");
-          process.exit(1);
-      }
       break;
     case "doctor":
       await handleDoctor();

@@ -108,6 +108,18 @@ export class VertexAIModel implements ModelProvider {
               }
             }
           }
+
+          if (msg.text) {
+            parts.push({ text: msg.text });
+          }
+          if (msg.images) {
+            for (const img of msg.images) {
+              parts.push({
+                inlineData: { data: img.data, mimeType: img.mimeType },
+              });
+            }
+          }
+
           contents.push({ role: "user", parts });
         } else {
           contents.push({

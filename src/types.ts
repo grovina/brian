@@ -53,18 +53,10 @@ export interface ModelProvider {
   }): Promise<ModelResponse>;
 }
 
-export interface WakeStrategy {
-  start(handler: () => Promise<void>): Promise<void>;
-  stop(): Promise<void>;
-  tools?(): Tool[];
-  promptSection?(): string;
-}
-
 export interface BrianConfig {
   name: string;
   model: ModelProvider;
-  wake: WakeStrategy;
   tools?: Tool[];
-  mcp?: string | string[];
   stateDir?: string;
+  slack?: { token: string };
 }

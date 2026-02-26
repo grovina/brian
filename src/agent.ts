@@ -8,10 +8,10 @@ import type {
   ToolResult,
 } from "./types.js";
 import { buildSystemPrompt } from "./prompt.js";
-import { MCPManager } from "./mcp.js";
+import { UpdateQueue, formatUpdates, collectImages } from "./updates.js";
 import { Memory } from "./memory.js";
 
-const MAX_TURNS = 80;
+const MAX_TURNS_PER_CYCLE = 200;
 const MAX_RETRIES = 3;
 const MAX_HISTORY_MESSAGES = 100;
 
@@ -20,7 +20,7 @@ interface AgentConfig {
   stateDir: string;
   model: ModelProvider;
   tools: Tool[];
-  mcp: MCPManager;
+  updates: UpdateQueue;
   extraPromptSections?: string[];
 }
 
@@ -50,6 +50,16 @@ function stripImages(messages: Message[]): Message[] {
   }));
 }
 
+function currentTime(): string {
+  return new Date().toLocaleString("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export class Agent {
   private history: Message[] = [];
   private config: AgentConfig;
@@ -62,49 +72,26 @@ export class Agent {
     this.stateFile = path.join(config.stateDir, "conversation.json");
   }
 
-  async init(): Promise<void> {
+  async loop(): Promise<never> {
     await this.loadHistory();
-  }
 
-  async run(): Promise<void> {
-    const startTime = Date.now();
-
-    const systemPrompt = await buildSystemPrompt({
-      name: this.config.name,
-      stateDir: this.config.stateDir,
-      extraSections: this.config.extraPromptSections,
-    });
-
-    const now = new Date();
-    const wake = now.toLocaleString("en-GB", {
-      weekday: "short",
-      day: "numeric",
-      month: "short",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-
-    while (
-      this.history.length > 0 &&
-      this.history[this.history.length - 1].role === "user"
-    ) {
-      this.history.pop();
-    }
+    const toolDefs = this.config.tools.map((t) => t.definition);
+    let turnsSinceWait = 0;
 
     this.history.push({
       role: "user",
-      text: `[${wake}]`,
+      text: `[${currentTime()}]`,
     });
 
-    const allToolDefs = this.getAllToolDefinitions();
-    let toolCalls = 0;
-    let tokensIn = 0;
-    let tokensOut = 0;
+    while (true) {
+      const systemPrompt = await buildSystemPrompt({
+        name: this.config.name,
+        stateDir: this.config.stateDir,
+        extraSections: this.config.extraPromptSections,
+      });
 
-    for (let turn = 0; turn < MAX_TURNS; turn++) {
-      const response = await this.callWithRetry(systemPrompt, allToolDefs);
-      tokensIn += response.usage?.inputTokens ?? 0;
-      tokensOut += response.usage?.outputTokens ?? 0;
+      const startTime = Date.now();
+      const response = await this.callWithRetry(systemPrompt, toolDefs);
 
       this.history.push({
         role: "assistant",
@@ -115,7 +102,12 @@ export class Agent {
 
       if (response.toolCalls && response.toolCalls.length > 0) {
         const results = await this.executeToolCalls(response.toolCalls);
-        toolCalls += response.toolCalls.length;
+        turnsSinceWait++;
+
+        // --- Control point ---
+        const pending = this.config.updates.drain();
+        const updateText = pending.length > 0 ? formatUpdates(pending) : undefined;
+        const updateImages = collectImages(pending);
 
         this.history.push({
           role: "user",
@@ -124,26 +116,32 @@ export class Agent {
             result: typeof r === "string" ? r : r.text,
             images: typeof r !== "string" ? r.images : undefined,
           })),
+          text: updateText,
+          images: updateImages.length > 0 ? updateImages : undefined,
         });
-        continue;
+      } else {
+        // Model produced text without tool calls — inject updates or time marker
+        const pending = this.config.updates.drain();
+        this.history.push({
+          role: "user",
+          text: pending.length > 0 ? formatUpdates(pending) : `[${currentTime()}]`,
+        });
+        turnsSinceWait = 0;
       }
 
-      break;
+      this.trimHistory();
+      await this.saveHistory();
+
+      await this.logStats({
+        tokensIn: response.usage?.inputTokens ?? 0,
+        tokensOut: response.usage?.outputTokens ?? 0,
+        durationMs: Date.now() - startTime,
+      });
+
+      if (turnsSinceWait >= MAX_TURNS_PER_CYCLE) {
+        turnsSinceWait = 0;
+      }
     }
-
-    await this.saveHistory();
-    await this.logStats({
-      toolCalls,
-      tokensIn,
-      tokensOut,
-      durationMs: Date.now() - startTime,
-    });
-  }
-
-  private getAllToolDefinitions(): ToolDefinition[] {
-    const builtIn = this.config.tools.map((t) => t.definition);
-    const mcp = this.config.mcp.getToolDefinitions();
-    return [...builtIn, ...mcp];
   }
 
   private async callWithRetry(
@@ -160,6 +158,7 @@ export class Agent {
         });
       } catch (err) {
         lastError = err as Error;
+        console.error(`[agent] model error (attempt ${attempt + 1}):`, lastError.message);
         if (attempt < MAX_RETRIES - 1) {
           const delay = Math.pow(2, attempt) * 1000;
           await new Promise((r) => setTimeout(r, delay));
@@ -181,17 +180,11 @@ export class Agent {
       );
 
       try {
-        if (this.config.mcp.isMCPTool(call.name)) {
-          results.push(
-            await this.config.mcp.executeTool(call.name, call.args)
-          );
+        const tool = this.toolMap.get(call.name);
+        if (!tool) {
+          results.push(`Unknown tool: ${call.name}`);
         } else {
-          const tool = this.toolMap.get(call.name);
-          if (!tool) {
-            results.push(`Unknown tool: ${call.name}`);
-          } else {
-            results.push(await tool.execute(call.args));
-          }
+          results.push(await tool.execute(call.args));
         }
       } catch (err) {
         results.push(`Tool error: ${(err as Error).message}`);
@@ -234,8 +227,15 @@ export class Agent {
     }
   }
 
+  private trimHistory(): void {
+    if (this.history.length > MAX_HISTORY_MESSAGES) {
+      this.history = sanitizeHistory(
+        this.history.slice(-MAX_HISTORY_MESSAGES)
+      );
+    }
+  }
+
   private async logStats(stats: {
-    toolCalls: number;
     tokensIn: number;
     tokensOut: number;
     durationMs: number;
@@ -245,7 +245,7 @@ export class Agent {
       minute: "2-digit",
     });
     const duration = (stats.durationMs / 1000).toFixed(1);
-    const line = `- [${time}] ${stats.tokensIn} in + ${stats.tokensOut} out tokens | ${stats.toolCalls} tools | ${duration}s\n`;
+    const line = `- [${time}] ${stats.tokensIn} in + ${stats.tokensOut} out tokens | ${duration}s\n`;
 
     const memory = new Memory(this.config.stateDir);
     const logPath = memory.todayLogPath();

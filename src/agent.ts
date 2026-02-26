@@ -16,6 +16,10 @@ import { clip, formatArgs, formatErrorMessage, formatToolResult, oneLine } from 
 
 const MAX_RETRIES = 3;
 const MAX_HISTORY_MESSAGES = 100;
+const MAX_TURN_INPUT_CHARS = 320_000;
+const MAX_MESSAGE_TEXT_CHARS = 32_000;
+const MAX_TOOL_RESULT_CHARS = 16_000;
+const MIN_MESSAGES_AFTER_COMPACTION = 20;
 
 interface AgentConfig {
   name: string;
@@ -29,6 +33,48 @@ interface TurnInput {
   systemPrompt: string;
   messages: Message[];
   tools: ToolDefinition[];
+}
+
+type TruncateKeep = "start" | "end";
+
+function truncateText(
+  text: string,
+  maxChars: number,
+  keep: TruncateKeep
+): string {
+  if (text.length <= maxChars) return text;
+  const notice =
+    keep === "end"
+      ? `[content truncated before this point; kept latest ${maxChars} chars]\n`
+      : `[content truncated after this point; kept first ${maxChars} chars]\n`;
+  const keptChars = Math.max(0, maxChars - notice.length);
+  if (keep === "end") {
+    return notice + text.slice(-keptChars);
+  }
+  return notice + text.slice(0, keptChars);
+}
+
+function estimateInputChars(input: TurnInput): number {
+  let total = input.systemPrompt.length;
+  for (const msg of input.messages) {
+    total += msg.text?.length ?? 0;
+    if (msg.toolCalls) {
+      for (const call of msg.toolCalls) {
+        total += call.name.length;
+        try {
+          total += JSON.stringify(call.args).length;
+        } catch {
+          total += 100;
+        }
+      }
+    }
+    if (msg.toolResults) {
+      for (const result of msg.toolResults) {
+        total += result.result.length;
+      }
+    }
+  }
+  return total;
 }
 
 export class Agent {
@@ -129,11 +175,11 @@ export class Agent {
       name: this.config.name,
       stateDir: this.config.stateDir,
     });
-    return {
+    return this.maybeTruncateInput({
       systemPrompt,
       messages: this.history,
       tools,
-    };
+    });
   }
 
   private async callWithRetry(input: TurnInput) {
@@ -222,5 +268,43 @@ export class Agent {
       role: "user",
       text: `[Context compacted at ${formatTime()} — ${dropped} older messages were dropped. Long-term knowledge is in memory.md.]`,
     });
+  }
+
+  private maybeTruncateInput(input: TurnInput): TurnInput {
+    let messages = input.messages.map((msg) => ({
+      ...msg,
+      text: msg.text
+        ? truncateText(msg.text, MAX_MESSAGE_TEXT_CHARS, "end")
+        : undefined,
+      toolResults: msg.toolResults?.map((result) => ({
+        ...result,
+        result: truncateText(result.result, MAX_TOOL_RESULT_CHARS, "end"),
+      })),
+    }));
+
+    const compacted: TurnInput = {
+      ...input,
+      messages,
+    };
+
+    let dropped = 0;
+    while (
+      estimateInputChars(compacted) > MAX_TURN_INPUT_CHARS &&
+      compacted.messages.length > MIN_MESSAGES_AFTER_COMPACTION
+    ) {
+      compacted.messages.shift();
+      dropped++;
+    }
+
+    if (dropped > 0) {
+      compacted.messages = sanitizeHistory(compacted.messages);
+      compacted.messages.unshift({
+        role: "user",
+        text: `[Context compacted before model call at ${formatTime()} — ${dropped} older messages were dropped due to input size.]`,
+      });
+      console.log(`input compacted before model call (${dropped} messages dropped)`);
+    }
+
+    return compacted;
   }
 }

@@ -40,6 +40,9 @@ interface SlackEventRoute {
 
 const DEFAULT_POLL_INTERVAL_MS = 30_000;
 const MAX_IMAGE_BYTES = 1024 * 1024; // 1MB
+const MAX_SLACK_MESSAGES_PER_POLL = 120;
+const MAX_SLACK_MESSAGE_TEXT_CHARS = 500;
+const MAX_SLACK_UPDATE_CHARS = 32_000;
 const ALLOWED_IMAGE_MIME_TYPES = new Set([
   "image/jpeg",
   "image/png",
@@ -56,6 +59,16 @@ function summarizeTextPayload(raw: string, maxLen = 220): string {
     .trim();
   if (!text) return "";
   return text.length > maxLen ? `${text.slice(0, maxLen)}...` : text;
+}
+
+function clampMessageText(text: string): string {
+  if (text.length <= MAX_SLACK_MESSAGE_TEXT_CHARS) return text;
+  return `${text.slice(0, MAX_SLACK_MESSAGE_TEXT_CHARS)}... [truncated]`;
+}
+
+function parseSlackTs(ts: string): number {
+  const value = Number.parseFloat(ts);
+  return Number.isFinite(value) ? value : 0;
 }
 
 export class Slack {
@@ -196,12 +209,19 @@ export class Slack {
 
     if (newMessages.length === 0) return;
 
-    const grouped = this.groupByChannel(newMessages);
+    // Keep the newest messages first, then restore chronological order for readability.
+    const keptMessages = [...newMessages]
+      .sort((a, b) => parseSlackTs(b.messageTs) - parseSlackTs(a.messageTs))
+      .slice(0, MAX_SLACK_MESSAGES_PER_POLL)
+      .sort((a, b) => parseSlackTs(a.messageTs) - parseSlackTs(b.messageTs));
+    const droppedMessages = newMessages.length - keptMessages.length;
+
+    const grouped = this.groupByChannel(keptMessages);
     const lines: string[] = [];
     const events: string[] = [];
     const allImages: ImageData[] = [];
 
-    for (const msg of newMessages) {
+    for (const msg of keptMessages) {
       events.push(
         JSON.stringify({
           event_id: msg.eventId,
@@ -212,7 +232,7 @@ export class Slack {
           is_thread_reply: msg.isThreadReply,
           user_id: msg.user,
           user_name: msg.userName,
-          text: msg.text,
+          text: clampMessageText(msg.text),
           received_at: msg.receivedAt,
         })
       );
@@ -224,7 +244,7 @@ export class Slack {
         const time = this.formatTs(msg.messageTs);
         const prefix = msg.threadTs ? "  ↳ " : "- ";
         lines.push(
-          `${prefix}${msg.userName} (${time}) [event_id=${msg.eventId}]: ${msg.text}`
+          `${prefix}${msg.userName} (${time}) [event_id=${msg.eventId}]: ${clampMessageText(msg.text)}`
         );
         if (msg.images) allImages.push(...msg.images);
         if (msg.attachmentNotes && msg.attachmentNotes.length > 0) {
@@ -235,15 +255,31 @@ export class Slack {
       }
     }
 
+    const metadata: string[] = [];
+    if (droppedMessages > 0) {
+      metadata.push(
+        `[slack updates truncated: kept latest ${keptMessages.length} of ${newMessages.length} messages]`
+      );
+    }
+
+    let content = [
+      ...metadata,
+      "**Slack events (JSONL):**",
+      ...events,
+      "",
+      "**Slack updates:**",
+      ...lines,
+    ].join("\n");
+
+    if (content.length > MAX_SLACK_UPDATE_CHARS) {
+      content =
+        `[slack updates truncated before this point: kept latest ${MAX_SLACK_UPDATE_CHARS} chars]\n` +
+        content.slice(-MAX_SLACK_UPDATE_CHARS);
+    }
+
     updates.push({
       source: "slack",
-      content: [
-        "**Slack events (JSONL):**",
-        ...events,
-        "",
-        "**Slack updates:**",
-        ...lines,
-      ].join("\n"),
+      content,
       images: allImages.length > 0 ? allImages : undefined,
       timestamp: new Date(),
     });

@@ -24,6 +24,35 @@ export interface Message {
   metadata?: unknown;
 }
 
+export function formatTime(date = new Date()): string {
+  return date.toLocaleString("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/** Drops leading messages until the first user message with text content. */
+export function sanitizeHistory(messages: Message[]): Message[] {
+  let start = 0;
+  while (start < messages.length) {
+    const msg = messages[start];
+    if (msg.role !== "user") {
+      start++;
+      continue;
+    }
+    if (msg.toolResults) {
+      start++;
+      continue;
+    }
+    if (msg.text) break;
+    start++;
+  }
+  return messages.slice(start);
+}
+
 export interface ModelResponse {
   text?: string;
   toolCalls?: ToolCall[];

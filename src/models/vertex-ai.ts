@@ -82,7 +82,7 @@ export class VertexAIModel implements ModelProvider {
         inputTokens: response.usageMetadata?.promptTokenCount ?? 0,
         outputTokens: response.usageMetadata?.candidatesTokenCount ?? 0,
       },
-      metadata: rawParts,
+      metadata: rawParts.length > 0 ? rawParts : undefined,
     };
   }
 

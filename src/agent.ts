@@ -1,19 +1,18 @@
 import fs from "fs/promises";
 import path from "path";
-import type {
-  ModelProvider,
-  Message,
-  Tool,
-  ToolDefinition,
-  ToolResult,
+import {
+  formatTime,
+  sanitizeHistory,
+  type ModelProvider,
+  type Message,
+  type Tool,
+  type ToolDefinition,
+  type ToolResult,
 } from "./types.js";
 import { buildSystemPrompt } from "./prompt.js";
 import { UpdateQueue, formatUpdates, collectImages } from "./updates.js";
-import { Memory } from "./memory.js";
-import { SignalStore, formatSignalSection } from "./signals.js";
 import { TurnStore } from "./turns.js";
 
-const MAX_TURNS_PER_CYCLE = 200;
 const MAX_RETRIES = 3;
 const MAX_HISTORY_MESSAGES = 100;
 
@@ -23,56 +22,23 @@ interface AgentConfig {
   model: ModelProvider;
   tools: Tool[];
   updates: UpdateQueue;
-  extraPromptSections?: string[];
 }
 
 interface TurnInput {
   systemPrompt: string;
   messages: Message[];
   tools: ToolDefinition[];
-  signalSection: string | null;
-}
-
-function sanitizeHistory(messages: Message[]): Message[] {
-  let start = 0;
-  while (start < messages.length) {
-    const msg = messages[start];
-    if (msg.role !== "user") {
-      start++;
-      continue;
-    }
-    if (msg.toolResults) {
-      start++;
-      continue;
-    }
-    if (msg.text) break;
-    start++;
-  }
-  return messages.slice(start);
-}
-
-function currentTime(): string {
-  return new Date().toLocaleString("en-GB", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 export class Agent {
   private history: Message[] = [];
   private config: AgentConfig;
   private toolMap: Map<string, Tool>;
-  private signalStore: SignalStore;
   private turnStore: TurnStore;
-  private turnSeq = 0;
 
   constructor(config: AgentConfig) {
     this.config = config;
     this.toolMap = new Map(config.tools.map((t) => [t.name, t]));
-    this.signalStore = new SignalStore(config.stateDir);
     this.turnStore = new TurnStore(config.stateDir);
   }
 
@@ -80,58 +46,48 @@ export class Agent {
     await this.loadHistory();
 
     const toolDefs = this.config.tools.map((t) => t.definition);
-    let turnsSinceWait = 0;
 
     this.history.push({
       role: "user",
-      text: `[${currentTime()}]`,
+      text: `[${formatTime()}]`,
     });
 
     while (true) {
       const turnInput = await this.buildTurnInput(toolDefs);
-      const turnId = ++this.turnSeq;
-      await this.turnStore.appendRequest({
-        turnId,
-        provider: process.env.MODEL_PROVIDER ?? null,
-        modelId: process.env.MODEL_ID ?? null,
-        input: turnInput,
-      });
 
       const startTime = Date.now();
       const response = await this.callWithRetry(turnInput);
-      await this.turnStore.appendResponse({
-        turnId,
+
+      await this.turnStore.save({
+        ts: new Date().toISOString(),
+        provider: process.env.MODEL_PROVIDER ?? null,
+        modelId: process.env.MODEL_ID ?? null,
+        durationMs: Date.now() - startTime,
+        input: turnInput,
         response,
       });
-      const metadata =
-        Array.isArray(response.metadata) && response.metadata.length === 0
-          ? undefined
-          : response.metadata;
+
       const hasAssistantContent =
         Boolean(response.text) ||
         Boolean(response.toolCalls && response.toolCalls.length > 0) ||
-        metadata !== undefined;
+        response.metadata !== undefined;
 
       if (hasAssistantContent) {
         this.history.push({
           role: "assistant",
           text: response.text,
           toolCalls: response.toolCalls,
-          metadata,
+          metadata: response.metadata,
         });
       }
 
       if (response.toolCalls && response.toolCalls.length > 0) {
         const results = await this.executeToolCalls(response.toolCalls);
-        turnsSinceWait++;
 
-        // --- Control point ---
         const pending = this.config.updates.drain();
-        const updateText = pending.length > 0 ? formatUpdates(pending) : undefined;
+        const updateText =
+          pending.length > 0 ? formatUpdates(pending) : undefined;
         const updateImages = collectImages(pending);
-        for (const update of pending) {
-          await this.signalStore.append(update.content, update.timestamp);
-        }
 
         this.history.push({
           role: "user",
@@ -144,55 +100,32 @@ export class Agent {
           images: updateImages.length > 0 ? updateImages : undefined,
         });
       } else {
-        // Model produced text without tool calls — inject updates or time marker
         const pending = this.config.updates.drain();
-        for (const update of pending) {
-          await this.signalStore.append(update.content, update.timestamp);
-        }
         this.history.push({
           role: "user",
-          text: pending.length > 0 ? formatUpdates(pending) : `[${currentTime()}]`,
+          text:
+            pending.length > 0 ? formatUpdates(pending) : `[${formatTime()}]`,
         });
-        turnsSinceWait = 0;
       }
 
       this.trimHistory();
-
-      await this.logStats({
-        tokensIn: response.usage?.inputTokens ?? 0,
-        tokensOut: response.usage?.outputTokens ?? 0,
-        durationMs: Date.now() - startTime,
-      });
-
-      if (turnsSinceWait >= MAX_TURNS_PER_CYCLE) {
-        turnsSinceWait = 0;
-      }
+      await this.saveHistory();
     }
   }
 
   private async buildTurnInput(tools: ToolDefinition[]): Promise<TurnInput> {
-    const signalSection = formatSignalSection(
-      await this.signalStore.readRecent(12)
-    );
     const systemPrompt = await buildSystemPrompt({
       name: this.config.name,
       stateDir: this.config.stateDir,
-      extraSections: [
-        ...(this.config.extraPromptSections ?? []),
-        ...(signalSection ? [signalSection] : []),
-      ],
     });
     return {
       systemPrompt,
       messages: this.history,
       tools,
-      signalSection,
     };
   }
 
-  private async callWithRetry(
-    input: TurnInput
-  ) {
+  private async callWithRetry(input: TurnInput) {
     let lastError: Error | null = null;
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       try {
@@ -203,7 +136,10 @@ export class Agent {
         });
       } catch (err) {
         lastError = err as Error;
-        console.error(`[agent] model error (attempt ${attempt + 1}):`, lastError.message);
+        console.error(
+          `[agent] model error (attempt ${attempt + 1}):`,
+          lastError.message
+        );
         if (attempt < MAX_RETRIES - 1) {
           const delay = Math.pow(2, attempt) * 1000;
           await new Promise((r) => setTimeout(r, delay));
@@ -241,42 +177,35 @@ export class Agent {
 
   private async loadHistory(): Promise<void> {
     try {
-      const restored = await this.turnStore.restoreRecentMessages(
-        MAX_HISTORY_MESSAGES
+      const raw = await fs.readFile(
+        path.join(this.config.stateDir, "history.json"),
+        "utf-8"
       );
-      this.history = restored.messages;
-      this.turnSeq = restored.maxTurnId;
-      console.log(
-        `Restored ${this.history.length} messages from turns`
-      );
+      this.history = sanitizeHistory(JSON.parse(raw) as Message[]);
+      console.log(`Restored ${this.history.length} messages from history`);
     } catch {
       console.log("Starting fresh conversation");
     }
   }
 
-  private trimHistory(): void {
-    if (this.history.length > MAX_HISTORY_MESSAGES) {
-      this.history = sanitizeHistory(
-        this.history.slice(-MAX_HISTORY_MESSAGES)
-      );
-    }
+  private async saveHistory(): Promise<void> {
+    await fs.writeFile(
+      path.join(this.config.stateDir, "history.json"),
+      JSON.stringify(this.history)
+    );
   }
 
-  private async logStats(stats: {
-    tokensIn: number;
-    tokensOut: number;
-    durationMs: number;
-  }): Promise<void> {
-    const time = new Date().toLocaleTimeString("en-GB", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-    const duration = (stats.durationMs / 1000).toFixed(1);
-    const line = `- [${time}] ${stats.tokensIn} in + ${stats.tokensOut} out tokens | ${duration}s\n`;
+  private trimHistory(): void {
+    if (this.history.length <= MAX_HISTORY_MESSAGES) return;
 
-    const memory = new Memory(this.config.stateDir);
-    const logPath = memory.todayLogPath();
-    await fs.mkdir(path.dirname(logPath), { recursive: true });
-    await fs.appendFile(logPath, line);
+    const dropped = this.history.length - MAX_HISTORY_MESSAGES;
+    this.history = sanitizeHistory(
+      this.history.slice(-MAX_HISTORY_MESSAGES)
+    );
+
+    this.history.unshift({
+      role: "user",
+      text: `[Context compacted at ${formatTime()} — ${dropped} older messages were dropped. Long-term knowledge is in memory.md.]`,
+    });
   }
 }

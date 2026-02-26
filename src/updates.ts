@@ -1,4 +1,4 @@
-import type { ImageData } from "./types.js";
+import { formatTime, type ImageData } from "./types.js";
 
 export interface Update {
   source: string;
@@ -20,21 +20,12 @@ export class UpdateQueue {
     return updates;
   }
 
-  hasPending(): boolean {
-    return this.pending.length > 0;
-  }
 }
 
 export function formatUpdates(updates: Update[]): string {
   if (updates.length === 0) return "";
 
-  const time = new Date().toLocaleString("en-GB", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const time = formatTime();
 
   const body = updates.map((u) => u.content).join("\n\n");
   return `[${time}]\n\n${body}`;

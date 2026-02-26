@@ -74,7 +74,7 @@ export class Slack {
     this.client = new WebClient(config.token);
     this.stateDir = config.stateDir;
     this.pollIntervalMs = config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
-    this.cursorsFile = path.join(config.stateDir, "slack-cursors.json");
+    this.cursorsFile = path.join(config.stateDir, "slack.json");
   }
 
   async sendMessage(input: {

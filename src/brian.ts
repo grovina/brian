@@ -6,7 +6,6 @@ import { Agent } from "./agent.js";
 import { UpdateQueue } from "./updates.js";
 import { Slack } from "./slack.js";
 import { slackTools } from "./tools/slack.js";
-import { initLogger } from "./logger.js";
 
 export class Brian {
   private config: BrianConfig;
@@ -21,7 +20,6 @@ export class Brian {
 
   async start(): Promise<void> {
     await fs.mkdir(this.stateDir, { recursive: true });
-    initLogger(this.stateDir);
 
     console.log(`${this.config.name} starting up...`);
 

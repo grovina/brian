@@ -1,6 +1,16 @@
 # Brian
 
-Framework for autonomous AI coworkers. Brian is not a chatbot — it's the foundation for building persistent, autonomous agents that wake up, look around, decide what to do, and act.
+Brian is a framework for autonomous AI coworkers. Not a chatbot — a persistent colleague that runs continuously, decides what to do, and acts.
+
+## Philosophy
+
+Brian operates as a **single eternal turn**. There are no wake/sleep cycles, no scheduled jobs, no event-driven triggers. The agent runs one continuous loop: think, act, repeat. When there's nothing to do, it calls `wait` — a tool like any other — and resumes when the wait is over. Process restarts are just blips; the conversation picks up where it left off.
+
+Each brian runs from **its own fork** of this repo on its own VM. It can read and modify its own code, open PRs, and redeploy itself. The fork is the deployment unit — not a read-only dependency.
+
+Instance-specific state (memory, conversation history, credentials) lives in `~/.brian/` on the VM, outside the repo. The repo stays org-agnostic; no merge conflicts when syncing upstream.
+
+Brian communicates with humans and other brians via **Slack**, and works with code via **GitHub** (through `gh`). It has full shell access and can install and use any headless CLI tool on its VM.
 
 ## Quick Start
 
@@ -8,135 +18,90 @@ Framework for autonomous AI coworkers. Brian is not a chatbot — it's the found
 curl -fsSL https://raw.githubusercontent.com/grovina/brian/main/bootstrap.sh | bash
 ```
 
-The bootstrap script forks this repo to your org, deploys the fork to a GCP VM, and runs `brian setup` to initialize everything. You end up with one repo:
-
-- **`your-org/brian`** — your fork of the framework, directly deployed and editable
-
-Instance-specific state (instructions, MCP configs, context) lives in `~/.brian/` on the VM, outside the repo — no merge conflicts when syncing upstream.
+The bootstrap script forks this repo to your org, deploys the fork to a GCP VM, and runs `brian setup` to initialize everything.
 
 ## Architecture
 
 ```text
 src/
-├── start.ts              # Default entry point (reads env vars)
-├── brian.ts              # Brian class — orchestrates everything
-├── types.ts              # Core interfaces
-├── agent.ts              # Model-agnostic agent loop
-├── prompt.ts             # System prompt builder (reads context/)
-├── memory.ts             # State: memory.md, conversation, logs
-├── mcp.ts                # MCP server manager
-├── logger.ts             # File + console logging
-├── models/               # Model providers
+├── start.ts              # Entry point (reads env vars, wires everything)
+├── brian.ts              # Brian class — orchestrates agent + integrations
+├── agent.ts              # The loop: think → act → observe → repeat
+├── types.ts              # Core interfaces (Message, Tool, ModelProvider)
+├── prompt.ts             # System prompt builder
+├── memory.ts             # memory.md access
+├── turns.ts              # Turn snapshots (one file per model call)
+├── updates.ts            # External event queue (drained at control points)
+├── slack.ts              # Slack polling and message routing
+├── model.ts              # Model provider factory
+├── models/
 │   ├── vertex-ai.ts      # Google Vertex AI (Gemini)
 │   └── anthropic.ts      # Anthropic (Claude)
-├── tools/                # Built-in tools
-│   └── bash.ts           # Shell execution
-├── wake/                 # Wake strategies
-│   └── autonomous.ts     # Model-driven autonomous scheduling
-├── modules/              # Module catalog
-│   ├── slack/            # Slack messaging (MCP)
-│   ├── github/           # GitHub integration (MCP)
-│   ├── updater/          # Fork update checker
-│   ├── cursor/           # Cursor IDE CLI
-│   └── claude/           # Claude Code CLI
-└── cli/                  # brian CLI
-    └── brian.ts          # Setup, module management, sync, doctor
+├── tools/
+│   ├── bash.ts           # Shell execution
+│   ├── wait.ts           # Pause execution (agent-controlled pacing)
+│   └── slack.ts          # Send messages and reactions
+└── cli/
+    └── brian.ts           # brian CLI (setup, redeploy, sync, doctor)
 ```
 
-## What You Get
+### The Loop
 
-A brian built on this framework is a long-running process that:
+`Agent.loop()` is `Promise<never>` — it literally never returns. Each iteration:
 
-- **Wakes up on a schedule** — checks communication channels, ongoing tasks, notifications
-- **Acts autonomously** — uses tools (bash, MCP servers, memory) to get work done
-- **Controls its own schedule** — decides when to wake up next based on context
-- **Remembers across restarts** — persistent memory, auto-compacted conversation, activity logs
-- **Improves itself** — can modify its own code, open PRs, and redeploy itself
+1. Build the turn input (system prompt + conversation history + tools)
+2. Call the model
+3. If tool calls: execute them, drain any queued external updates, push results back
+4. If no tool calls: inject a time marker or pending updates
+5. Trim history (with honest compaction marker when messages are dropped)
+6. Checkpoint conversation to `history.json`
+7. Repeat
 
-## Core Concepts
+The model always has something to respond to. External events (Slack messages) queue up and get injected at natural control points — after tool execution. The agent never misses anything; it just processes updates when it's ready.
 
-### Model Providers
-
-Implement `ModelProvider` to add LLM backends. Ships with:
-
-- **`VertexAIModel`** — Gemini via Google Cloud
-- **`AnthropicModel`** — Claude via Anthropic API
-
-Selected at runtime via `MODEL_PROVIDER` env var.
-For Vertex AI, set `VERTEX_AI_LOCATION` (default: `global`).
-
-### Wake Strategies
-
-Implement `WakeStrategy` to control when brian wakes up. Ships with:
-
-- **`AutonomousWake`** — the model decides when to wake up next via a `sleep_until` tool
-
-### Tools
-
-Brian has three kinds of tools:
-
-1. **Built-in** — memory (read/write/search) and wake strategy tools. Always available.
-2. **Catalog tools** — `bash`. Included by default.
-3. **MCP tools** — loaded from `~/.brian/mcp/`. Any MCP-compatible server works.
-
-### Modules
-
-Modules are the collective knowledge of all brians — tested setup scripts for common integrations. Each module knows how to install itself, check its status, and write context that the daemon reads at wake time.
-
-Modules are managed via the `brian` CLI:
-
-```bash
-brian module list              # see available modules
-brian module install slack     # install a module
-brian module check             # check all module status
-brian redeploy                 # pull, build, restart (with rollback)
-brian doctor                   # full health check
-brian sync                     # sync fork with upstream
-brian sync --check             # check fork status only
-```
-
-Default modules (installed on `brian setup`):
-
-- **slack** — Slack messaging via MCP
-- **github** — GitHub integration via MCP
-- **updater** — monitors fork for upstream changes
-
-Optional modules:
-
-- **cursor** — Cursor IDE CLI detection and setup
-- **claude** — Claude Code CLI installation and setup
-
-Adding a new module is straightforward: create a directory under `src/modules/` with `check()` and `install()` functions, register it in `src/modules/index.ts`, and open a PR. When a brian figures out how to set up something new, it contributes the module back.
-
-### Context
-
-The daemon reads all files from `~/.brian/context/` at every wake and includes them in the system prompt. Modules write context files here during install — this is how the agent learns about its available capabilities without runtime hooks.
+When the conversation window exceeds its limit, older messages are dropped and a compaction marker is injected so the model knows context was lost. Long-term knowledge persists in `memory.md` — the model is responsible for keeping it current.
 
 ### State
 
-Brian stores all instance state in `~/.brian/`:
-
 ```text
 ~/.brian/
-├── instructions.md        # Instance-specific instructions
-├── mcp/                   # MCP server configs (module-managed)
-│   ├── slack.json
-│   └── github.json
-├── context/               # Dynamic wake-time context (module-managed)
-│   ├── slack.md
-│   ├── github.md
-│   ├── fork-status.md
-│   └── ...
-├── memory.md              # Long-term knowledge (agent-curated)
-├── messages.jsonl         # Conversation message history (append-only)
-├── signals.jsonl          # Operational signals injected into prompt
-└── logs/
-    └── YYYY-MM-DD.md      # Daily activity logs
+├── memory.md              # Long-term knowledge (agent-managed via bash)
+├── history.json           # Current conversation window (checkpoint for restarts)
+├── slack.json             # Slack polling state
+└── turns/                 # One JSON file per model call (observability/debugging)
+    └── {datetime}.json
+```
+
+### Tools
+
+Brian's tool system is minimal:
+
+- **`bash`** — Shell execution. This is the primary way brian interacts with the world: git, gh, docker, node, file manipulation, CLI tools.
+- **`wait`** — Pause for N minutes. The agent decides when and how long to wait based on context. No scheduler, no cron — just a tool call.
+- **`slack_send` / `slack_react`** — Send messages and reactions. Routing metadata from incoming events enables threaded replies.
+
+### Model Providers
+
+Implements `ModelProvider` to abstract LLM backends:
+
+- **Vertex AI** — Gemini via Google Cloud (default)
+- **Anthropic** — Claude via Anthropic API
+
+Selected at runtime via `MODEL_PROVIDER` env var.
+
+### CLI
+
+```bash
+brian setup                 # Initialize state and install systemd service
+brian redeploy              # Pull, build, restart (with rollback on failure)
+brian config check          # Validate config and model connectivity
+brian doctor                # Full health check
+brian sync                  # Sync fork with upstream (fast-forward)
+brian sync --force          # Force-align fork to upstream
+brian sync --check          # Check fork status only
 ```
 
 ## How Contributions Flow
-
-Each org forks this repo. The fork is the deployment unit — not a read-only dependency.
 
 When a brian identifies a generic improvement:
 
@@ -146,6 +111,24 @@ When a brian identifies a generic improvement:
 4. Once merged, all forks benefit
 
 The framework stays org-agnostic. Instance-specific configuration belongs in `~/.brian/`, not in the repo.
+
+## Configuration
+
+Environment variables (typically in `/etc/brian/env`):
+
+| Variable | Required | Description |
+|---|---|---|
+| `BRIAN_NAME` | Yes | Agent name (also used as git author) |
+| `MODEL_PROVIDER` | No | `vertex-ai` (default) or `anthropic` |
+| `MODEL_ID` | No | Override default model |
+| `GCP_PROJECT` | For Vertex AI | Google Cloud project |
+| `VERTEX_AI_LOCATION` | No | Region (default: `global`) |
+| `ANTHROPIC_API_KEY` | For Anthropic | API key |
+| `SLACK_TOKEN` | No | Slack user token (`xoxp-...`) |
+| `BRIAN_STATE_DIR` | No | State directory (default: `~/.brian`) |
+| `BRIAN_REPO_DIR` | No | Repo directory (default: auto-detected) |
+
+Setup guides: [Vertex AI](docs/vertex-ai-setup.md) · [Anthropic](docs/anthropic-setup.md) · [Slack](docs/slack-setup.md) · [GitHub](docs/github-setup.md)
 
 ## License
 

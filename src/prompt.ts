@@ -1,7 +1,7 @@
 import fs from "fs/promises";
+import path from "path";
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { Memory } from "./memory.js";
 
 const execFileAsync = promisify(execFile);
 let cachedCapabilitiesSection: string | null | undefined;
@@ -39,10 +39,10 @@ async function buildCapabilitiesSection(): Promise<string | null> {
 export async function buildSystemPrompt(params: {
   name: string;
   stateDir: string;
-  extraSections?: string[];
 }): Promise<string> {
-  const memory = new Memory(params.stateDir);
-  const memoryContent = await memory.readMemory();
+  const memoryContent = await fs
+    .readFile(path.join(params.stateDir, "memory.md"), "utf-8")
+    .catch(() => "");
   const capabilitiesSection = await buildCapabilitiesSection();
 
   const sections = [
@@ -98,7 +98,6 @@ Your git author name is "${params.name}".`,
 
     capabilitiesSection,
     memoryContent ? `## Memory\n\n${memoryContent}` : null,
-    ...(params.extraSections ?? []),
   ];
 
   return sections.filter(Boolean).join("\n\n");

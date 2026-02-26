@@ -4,72 +4,77 @@ import type { Slack } from "../slack.js";
 export function slackTools(slack: Slack): Tool[] {
   return [
     {
-      name: "slack_post",
+      name: "slack_send",
       definition: {
-        name: "slack_post",
+        name: "slack_send",
         description:
-          "Send a message to a Slack channel or reply in a thread. If thread_ts is provided, the message is posted as a thread reply.",
+          "Send a Slack message. Use mode=reply with source_event_id to continue a conversation, or mode=channel with channel_id for a top-level channel message.",
         parameters: {
           type: "object",
           properties: {
-            channel: {
+            mode: {
               type: "string",
-              description: "Channel ID to post to",
+              enum: ["reply", "channel"],
+              description: "Reply to an event thread or post top-level in a channel",
             },
             text: {
               type: "string",
               description: "Message text",
             },
-            thread_ts: {
+            source_event_id: {
               type: "string",
-              description:
-                "Thread timestamp to reply to (omit for a new top-level message)",
+              description: "Slack event_id to reply to when mode=reply",
+            },
+            channel_id: {
+              type: "string",
+              description: "Channel ID to post to when mode=channel",
             },
           },
-          required: ["channel", "text"],
+          required: ["mode", "text"],
         },
       },
       async execute(input) {
-        const { channel, text, thread_ts } = input as {
-          channel: string;
+        const { mode, text, source_event_id, channel_id } = input as {
+          mode: "reply" | "channel";
           text: string;
-          thread_ts?: string;
+          source_event_id?: string;
+          channel_id?: string;
         };
-        const ts = await slack.postMessage(channel, text, thread_ts);
-        return `Message sent (ts: ${ts})`;
+        const result = await slack.sendMessage({
+          mode,
+          text,
+          sourceEventId: source_event_id,
+          channelId: channel_id,
+        });
+        return `Message sent (channel: ${result.channelId}, ts: ${result.ts}, thread_ts: ${result.threadTs ?? "none"})`;
       },
     },
     {
       name: "slack_react",
       definition: {
         name: "slack_react",
-        description: "React to a Slack message with an emoji.",
+        description: "React to a Slack event with an emoji.",
         parameters: {
           type: "object",
           properties: {
-            channel: {
+            source_event_id: {
               type: "string",
-              description: "Channel ID containing the message",
-            },
-            timestamp: {
-              type: "string",
-              description: "Timestamp of the message to react to",
+              description: "Slack event_id to react to",
             },
             emoji: {
               type: "string",
               description: "Emoji name without colons (e.g. thumbsup)",
             },
           },
-          required: ["channel", "timestamp", "emoji"],
+          required: ["source_event_id", "emoji"],
         },
       },
       async execute(input) {
-        const { channel, timestamp, emoji } = input as {
-          channel: string;
-          timestamp: string;
+        const { source_event_id, emoji } = input as {
+          source_event_id: string;
           emoji: string;
         };
-        await slack.addReaction(channel, timestamp, emoji);
+        await slack.addReactionByEvent(source_event_id, emoji);
         return `Reacted with :${emoji}:`;
       },
     },

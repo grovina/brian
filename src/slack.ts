@@ -11,12 +11,16 @@ export interface SlackConfig {
 }
 
 interface SlackMessage {
+  eventId: string;
   user: string;
+  userName: string;
   text: string;
-  ts: string;
+  messageTs: string;
   threadTs?: string;
-  channel: string;
+  channelId: string;
   channelName: string;
+  isThreadReply: boolean;
+  receivedAt: string;
   images?: ImageData[];
   attachmentNotes?: string[];
 }
@@ -25,6 +29,12 @@ interface ChannelInfo {
   id: string;
   name: string;
   isDm: boolean;
+}
+
+interface SlackEventRoute {
+  channelId: string;
+  messageTs: string;
+  threadTs?: string;
 }
 
 const DEFAULT_POLL_INTERVAL_MS = 30_000;
@@ -53,7 +63,9 @@ export class Slack {
   private pollIntervalMs: number;
   private cursors = new Map<string, string>();
   private users = new Map<string, string>();
+  private channelNames = new Map<string, string>();
   private trackedThreads = new Map<string, string>(); // "channel:thread_ts" -> last_ts
+  private eventRoutes = new Map<string, SlackEventRoute>();
   private polling = false;
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
   private cursorsFile: string;
@@ -65,11 +77,36 @@ export class Slack {
     this.cursorsFile = path.join(config.stateDir, "slack-cursors.json");
   }
 
-  async postMessage(
-    channel: string,
-    text: string,
-    threadTs?: string
-  ): Promise<string> {
+  async sendMessage(input: {
+    mode: "reply" | "channel";
+    text: string;
+    sourceEventId?: string;
+    channelId?: string;
+  }): Promise<{ ts: string; channelId: string; threadTs?: string }> {
+    const text = input.text?.trim();
+    if (!text) {
+      throw new Error("text is required");
+    }
+
+    let channel = input.channelId;
+    let threadTs: string | undefined;
+    if (input.mode === "reply") {
+      const eventId = input.sourceEventId?.trim();
+      if (!eventId) {
+        throw new Error("sourceEventId is required for reply mode");
+      }
+      const route = this.eventRoutes.get(eventId);
+      if (!route) {
+        throw new Error(
+          `Unknown sourceEventId: ${eventId}. Use a recent event_id from Slack events.`
+        );
+      }
+      channel = route.channelId;
+      threadTs = route.threadTs ?? route.messageTs;
+    } else if (!channel?.trim()) {
+      throw new Error("channelId is required for channel mode");
+    }
+
     const result = await this.client.chat.postMessage({
       channel,
       text,
@@ -82,17 +119,26 @@ export class Slack {
       this.trackThread(channel, result.ts);
     }
 
-    return result.ts ?? "sent";
+    return {
+      ts: result.ts ?? "sent",
+      channelId: channel,
+      threadTs,
+    };
   }
 
-  async addReaction(
-    channel: string,
-    timestamp: string,
+  async addReactionByEvent(
+    sourceEventId: string,
     emoji: string
   ): Promise<void> {
+    const route = this.eventRoutes.get(sourceEventId);
+    if (!route) {
+      throw new Error(
+        `Unknown sourceEventId: ${sourceEventId}. Use a recent event_id from Slack events.`
+      );
+    }
     await this.client.reactions.add({
-      channel,
-      timestamp,
+      channel: route.channelId,
+      timestamp: route.messageTs,
       name: emoji.replace(/^:|:$/g, ""),
     });
   }
@@ -151,15 +197,34 @@ export class Slack {
 
     const grouped = this.groupByChannel(newMessages);
     const lines: string[] = [];
+    const events: string[] = [];
     const allImages: ImageData[] = [];
+
+    for (const msg of newMessages) {
+      events.push(
+        JSON.stringify({
+          event_id: msg.eventId,
+          channel_id: msg.channelId,
+          channel_name: msg.channelName,
+          message_ts: msg.messageTs,
+          thread_ts: msg.threadTs,
+          is_thread_reply: msg.isThreadReply,
+          user_id: msg.user,
+          user_name: msg.userName,
+          text: msg.text,
+          received_at: msg.receivedAt,
+        })
+      );
+    }
 
     for (const [channelName, msgs] of grouped) {
       lines.push(`**#${channelName}:**`);
       for (const msg of msgs) {
-        const userName = await this.resolveUser(msg.user);
-        const time = this.formatTs(msg.ts);
+        const time = this.formatTs(msg.messageTs);
         const prefix = msg.threadTs ? "  ↳ " : "- ";
-        lines.push(`${prefix}${userName} (${time}): ${msg.text}`);
+        lines.push(
+          `${prefix}${msg.userName} (${time}) [event_id=${msg.eventId}]: ${msg.text}`
+        );
         if (msg.images) allImages.push(...msg.images);
         if (msg.attachmentNotes && msg.attachmentNotes.length > 0) {
           for (const note of msg.attachmentNotes) {
@@ -171,7 +236,13 @@ export class Slack {
 
     updates.push({
       source: "slack",
-      content: `**Slack updates:**\n${lines.join("\n")}`,
+      content: [
+        "**Slack events (JSONL):**",
+        ...events,
+        "",
+        "**Slack updates:**",
+        ...lines,
+      ].join("\n"),
       images: allImages.length > 0 ? allImages : undefined,
       timestamp: new Date(),
     });
@@ -193,9 +264,11 @@ export class Slack {
 
       for (const ch of result.channels ?? []) {
         if (!ch.id || !ch.is_member) continue;
+        const channelName = ch.name ?? ch.id;
+        this.channelNames.set(ch.id, channelName);
         channels.push({
           id: ch.id,
-          name: ch.name ?? ch.id,
+          name: channelName,
           isDm: ch.is_im ?? false,
         });
       }
@@ -223,16 +296,31 @@ export class Slack {
           continue;
         if (oldest && msg.ts === oldest) continue;
 
+        const user = msg.user ?? "unknown";
+        const userName = await this.resolveUser(user);
+        const messageTs = msg.ts;
+        const threadTs = msg.thread_ts !== msg.ts ? msg.thread_ts : undefined;
+        const channelName = channel.isDm ? userName : channel.name;
+        const eventId = this.eventId(channel.id, messageTs);
+        this.eventRoutes.set(eventId, {
+          channelId: channel.id,
+          messageTs,
+          threadTs,
+        });
+        this.pruneEventRoutes();
+
         const attachments = await this.extractImages(msg);
         messages.push({
-          user: msg.user ?? "unknown",
+          eventId,
+          user,
+          userName,
           text: msg.text,
-          ts: msg.ts,
-          threadTs: msg.thread_ts !== msg.ts ? msg.thread_ts : undefined,
-          channel: channel.id,
-          channelName: channel.isDm
-            ? await this.resolveUser(msg.user ?? "unknown")
-            : channel.name,
+          messageTs,
+          threadTs,
+          channelId: channel.id,
+          channelName,
+          isThreadReply: Boolean(threadTs),
+          receivedAt: new Date().toISOString(),
           images: attachments.images,
           attachmentNotes: attachments.notes,
         });
@@ -272,14 +360,29 @@ export class Slack {
           if (!msg.ts || !msg.text) continue;
           if (msg.ts === lastTs || msg.ts === threadTs) continue;
 
+          const user = msg.user ?? "unknown";
+          const userName = await this.resolveUser(user);
+          const messageTs = msg.ts;
+          const eventId = this.eventId(channel, messageTs);
+          this.eventRoutes.set(eventId, {
+            channelId: channel,
+            messageTs,
+            threadTs,
+          });
+          this.pruneEventRoutes();
+
           const attachments = await this.extractImages(msg);
           messages.push({
-            user: msg.user ?? "unknown",
+            eventId,
+            user,
+            userName,
             text: msg.text,
-            ts: msg.ts,
+            messageTs,
             threadTs,
-            channel,
-            channelName: channel,
+            channelId: channel,
+            channelName: this.channelNames.get(channel) ?? channel,
+            isThreadReply: true,
+            receivedAt: new Date().toISOString(),
             images: attachments.images,
             attachmentNotes: attachments.notes,
           });
@@ -433,6 +536,21 @@ export class Slack {
     });
   }
 
+  private eventId(channelId: string, messageTs: string): string {
+    return `slk_${channelId}_${messageTs.replace(/\./g, "_")}`;
+  }
+
+  private pruneEventRoutes(max = 5000): void {
+    if (this.eventRoutes.size <= max) return;
+    const extra = this.eventRoutes.size - max;
+    let removed = 0;
+    for (const key of this.eventRoutes.keys()) {
+      this.eventRoutes.delete(key);
+      removed++;
+      if (removed >= extra) break;
+    }
+  }
+
   private async loadCursors(): Promise<void> {
     try {
       const data = await fs.readFile(this.cursorsFile, "utf-8");
@@ -442,6 +560,11 @@ export class Slack {
       }
       if (parsed.threads) {
         this.trackedThreads = new Map(Object.entries(parsed.threads));
+      }
+      if (parsed.events) {
+        this.eventRoutes = new Map(
+          Object.entries(parsed.events) as Array<[string, SlackEventRoute]>
+        );
       }
     } catch {
       // fresh start
@@ -455,6 +578,7 @@ export class Slack {
         JSON.stringify({
           channels: Object.fromEntries(this.cursors),
           threads: Object.fromEntries(this.trackedThreads),
+          events: Object.fromEntries(this.eventRoutes),
         })
       );
     } catch (err) {

@@ -73,6 +73,8 @@ When external facts are uncertain, verify before acting, and prefer primary sour
 
 Slack updates are delivered to you automatically. Messages directed at you or relevant to your work can be answered in a timely way when that helps the work. Not every message needs a reply.
 
+Slack updates include structured routing metadata. Use that context to choose where and how to respond.
+
 Keep messages concise and actionable.
 
 ## Memory

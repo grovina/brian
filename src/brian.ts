@@ -21,7 +21,7 @@ export class Brian {
   async start(): Promise<void> {
     await fs.mkdir(this.stateDir, { recursive: true });
 
-    console.log(`${this.config.name} starting up...`);
+    console.log("agent starting");
 
     if (this.config.slack) {
       this.slack = new Slack({
@@ -29,7 +29,7 @@ export class Brian {
         stateDir: this.stateDir,
       });
       this.slack.startPolling(this.updates);
-      console.log(`Slack poller started`);
+      console.log("slack polling started");
     }
 
     const tools = [
@@ -45,7 +45,7 @@ export class Brian {
       updates: this.updates,
     });
 
-    console.log(`${this.config.name} running — ${tools.length} tools`);
+    console.log(`agent running with ${tools.length} tools`);
 
     process.on("SIGINT", () => this.shutdown());
     process.on("SIGTERM", () => this.shutdown());
@@ -54,7 +54,7 @@ export class Brian {
   }
 
   private async shutdown(): Promise<void> {
-    console.log(`${this.config.name} shutting down...`);
+    console.log("agent shutting down");
     this.slack?.stopPolling();
     process.exit(0);
   }

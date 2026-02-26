@@ -12,6 +12,7 @@ import {
 import { buildSystemPrompt } from "./prompt.js";
 import { UpdateQueue, formatUpdates, collectImages } from "./updates.js";
 import { TurnStore } from "./turns.js";
+import { clip, formatArgs, formatErrorMessage, formatToolResult, oneLine } from "./logs.js";
 
 const MAX_RETRIES = 3;
 const MAX_HISTORY_MESSAGES = 100;
@@ -57,12 +58,22 @@ export class Agent {
 
       const startTime = Date.now();
       const response = await this.callWithRetry(turnInput);
+      const durationMs = Date.now() - startTime;
+
+      if (response.text) {
+        console.log(`assistant ${clip(oneLine(response.text))}`);
+      }
+      if (response.toolCalls && response.toolCalls.length > 0) {
+        const names = response.toolCalls.map((call) => call.name).join(", ");
+        console.log(`tools requested ${names}`);
+      }
+      console.log(`model response in ${durationMs}ms`);
 
       await this.turnStore.save({
         ts: new Date().toISOString(),
         provider: process.env.MODEL_PROVIDER ?? null,
         modelId: process.env.MODEL_ID ?? null,
-        durationMs: Date.now() - startTime,
+        durationMs,
         input: turnInput,
         response,
       });
@@ -136,10 +147,11 @@ export class Agent {
         });
       } catch (err) {
         lastError = err as Error;
-        console.error(
-          `[agent] model error (attempt ${attempt + 1}):`,
-          lastError.message
-        );
+        if (attempt < MAX_RETRIES - 1) {
+          console.error(`model error: ${clip(formatErrorMessage(lastError))}; retrying`);
+        } else {
+          console.error(`model error: ${clip(formatErrorMessage(lastError))}; giving up`);
+        }
         if (attempt < MAX_RETRIES - 1) {
           const delay = Math.pow(2, attempt) * 1000;
           await new Promise((r) => setTimeout(r, delay));
@@ -155,20 +167,23 @@ export class Agent {
     const results: ToolResult[] = [];
 
     for (const call of calls) {
-      console.log(
-        `[tool] ${call.name}`,
-        JSON.stringify(call.args).slice(0, 200)
-      );
+      console.log(`>${call.name} ${formatArgs(call.args)}`);
 
       try {
         const tool = this.toolMap.get(call.name);
         if (!tool) {
-          results.push(`Unknown tool: ${call.name}`);
+          const msg = `Unknown tool: ${call.name}`;
+          results.push(msg);
+          console.log(`<${call.name} ${msg}`);
         } else {
-          results.push(await tool.execute(call.args));
+          const result = await tool.execute(call.args);
+          results.push(result);
+          console.log(`<${call.name} ${formatToolResult(result)}`);
         }
       } catch (err) {
-        results.push(`Tool error: ${(err as Error).message}`);
+        const msg = `Tool error: ${formatErrorMessage(err)}`;
+        results.push(msg);
+        console.log(`<${call.name} ${clip(oneLine(msg))}`);
       }
     }
 
@@ -182,9 +197,9 @@ export class Agent {
         "utf-8"
       );
       this.history = sanitizeHistory(JSON.parse(raw) as Message[]);
-      console.log(`Restored ${this.history.length} messages from history`);
+      console.log(`history restored (${this.history.length} messages)`);
     } catch {
-      console.log("Starting fresh conversation");
+      console.log("history is empty; starting fresh conversation");
     }
   }
 

@@ -33,7 +33,7 @@ function buildMachineSection(): string {
 async function buildCapabilitiesSection(): Promise<string | null> {
   if (cachedCapabilitiesSection !== undefined) return cachedCapabilitiesSection;
 
-  const candidates = ["gh", "cursor", "claude", "docker"];
+  const candidates = ["brian", "gh", "cursor", "claude", "docker"];
   try {
     const { stdout } = await execFileAsync(
       "bash",

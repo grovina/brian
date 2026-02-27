@@ -46,7 +46,7 @@ export function slackTools(slack: Slack): Tool[] {
           sourceEventId: source_event_id,
           channelId: channel_id,
         });
-        return `Message sent (channel: ${result.channelId}, ts: ${result.ts}, thread_ts: ${result.threadTs ?? "none"})`;
+        return `Sent`;
       },
     },
     {
@@ -75,7 +75,7 @@ export function slackTools(slack: Slack): Tool[] {
           emoji: string;
         };
         await slack.addReactionByEvent(source_event_id, emoji);
-        return `Reacted with :${emoji}:`;
+        return `Reacted`;
       },
     },
     {

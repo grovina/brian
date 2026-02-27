@@ -3,10 +3,11 @@ import { homedir } from "os";
 import { Brian } from "./brian.js";
 import { bash, wait } from "./tools/index.js";
 import { createModel } from "./model.js";
+import { logError } from "./logs.js";
 
 const name = process.env.BRIAN_NAME;
 if (!name) {
-  console.error("BRIAN_NAME not set");
+  logError("BRIAN_NAME not set");
   process.exit(1);
 }
 

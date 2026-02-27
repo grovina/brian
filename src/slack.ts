@@ -3,7 +3,7 @@ import fs from "fs/promises";
 import path from "path";
 import type { ImageData } from "./types.js";
 import { UpdateQueue, type Update } from "./updates.js";
-import { formatErrorMessage } from "./logs.js";
+import { formatErrorMessage, logError } from "./logs.js";
 
 export interface SlackConfig {
   token: string;
@@ -185,7 +185,7 @@ export class Slack {
       try {
         await this.poll(updates);
       } catch (err) {
-        console.error(`slack poll error: ${formatErrorMessage(err)}`);
+        logError(`slack poll error: ${formatErrorMessage(err)}`, { error: err });
       }
 
       if (!this.polling) break;
@@ -619,7 +619,9 @@ export class Slack {
         })
       );
     } catch (err) {
-      console.error(`slack failed to save cursors: ${formatErrorMessage(err)}`);
+      logError(`slack failed to save cursors: ${formatErrorMessage(err)}`, {
+        error: err,
+      });
     }
   }
 }

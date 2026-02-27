@@ -12,7 +12,7 @@ import {
 import { buildSystemPrompt } from "./prompt.js";
 import { UpdateQueue, formatUpdates, collectImages } from "./updates.js";
 import { TurnStore } from "./turns.js";
-import { clip, formatArgs, formatErrorMessage, formatToolResult, oneLine } from "./logs.js";
+import { clip, formatErrorMessage, log, logError, oneLine } from "./logs.js";
 
 const MAX_RETRIES = 3;
 const MAX_HISTORY_MESSAGES = 100;
@@ -77,6 +77,24 @@ function estimateInputChars(input: TurnInput): number {
   return total;
 }
 
+function toolPrefix(turnId: number, toolId: number, toolName: string): string {
+  return `[turn ${turnId}] [tool ${toolId}] ${toolName}`;
+}
+
+function formatToolResultContext(result: ToolResult): Record<string, unknown> {
+  if (typeof result === "string") {
+    return {
+      kind: "text",
+      text: result,
+    };
+  }
+  return {
+    kind: "text+images",
+    text: result.text,
+    imageCount: result.images?.length ?? 0,
+  };
+}
+
 export class Agent {
   private history: Message[] = [];
   private config: AgentConfig;
@@ -118,7 +136,7 @@ export class Agent {
       const durationMs = Date.now() - startTime;
 
       const requestedTools = response.toolCalls?.length ?? 0;
-      console.log(`[turn ${turnId}] model done ${durationMs}ms (tools: ${requestedTools})`);
+      log(`[turn ${turnId}] model done ${durationMs}ms (tools: ${requestedTools})`);
 
       await this.turnStore.save({
         ts: new Date().toISOString(),
@@ -198,15 +216,11 @@ export class Agent {
         });
       } catch (err) {
         lastError = err as Error;
-        if (attempt < MAX_RETRIES - 1) {
-          console.error(
-            `[turn ${turnId}] model error attempt ${attempt + 1}/${MAX_RETRIES}: ${clip(formatErrorMessage(lastError))} (retrying)`
-          );
-        } else {
-          console.error(
-            `[turn ${turnId}] model error attempt ${attempt + 1}/${MAX_RETRIES}: ${clip(formatErrorMessage(lastError))} (giving up)`
-          );
-        }
+        const mode = attempt < MAX_RETRIES - 1 ? "retrying" : "giving up";
+        logError(
+          `[turn ${turnId}] model error attempt ${attempt + 1}/${MAX_RETRIES}: ${clip(formatErrorMessage(lastError))} (${mode})`,
+          { error: lastError }
+        );
         if (attempt < MAX_RETRIES - 1) {
           const delay = Math.pow(2, attempt) * 1000;
           await new Promise((r) => setTimeout(r, delay));
@@ -224,8 +238,8 @@ export class Agent {
 
     for (const [index, call] of calls.entries()) {
       const toolId = index + 1;
-      const prefix = `[turn ${turnId}] [tool ${toolId}] ${call.name}`;
-      console.log(`${prefix} ${formatArgs(call.args)}`);
+      const prefix = toolPrefix(turnId, toolId, call.name);
+      log(prefix, call.args);
       const startedAt = Date.now();
 
       try {
@@ -234,23 +248,23 @@ export class Agent {
           const msg = `Unknown tool: ${call.name}`;
           results.push(msg);
           const elapsedMs = Date.now() - startedAt;
-          console.log(
-            `${prefix} done in ${elapsedMs}ms with ERROR: ${clip(oneLine(msg))}`
+          logError(
+            `${prefix} done in ${elapsedMs}ms with ERROR: ${clip(oneLine(msg))}`,
+            { message: msg, details: msg }
           );
         } else {
           const result = await tool.execute(call.args);
           results.push(result);
           const elapsedMs = Date.now() - startedAt;
-          console.log(
-            `${prefix} done in ${elapsedMs}ms: ${formatToolResult(result)}`
-          );
+          log(`${prefix} done in ${elapsedMs}ms`, formatToolResultContext(result));
         }
       } catch (err) {
         const msg = `Tool error: ${formatErrorMessage(err)}`;
         results.push(msg);
         const elapsedMs = Date.now() - startedAt;
-        console.log(
-          `${prefix} done in ${elapsedMs}ms with ERROR: ${clip(oneLine(msg))}`
+        logError(
+          `${prefix} done in ${elapsedMs}ms with ERROR: ${clip(oneLine(msg))}`,
+          { message: msg, details: err }
         );
       }
     }
@@ -265,9 +279,9 @@ export class Agent {
         "utf-8"
       );
       this.history = sanitizeHistory(JSON.parse(raw) as Message[]);
-      console.log(`history restored (${this.history.length} messages)`);
+      log(`history restored (${this.history.length} messages)`);
     } catch {
-      console.log("history is empty; starting fresh conversation");
+      log("history is empty; starting fresh conversation");
     }
   }
 
@@ -324,7 +338,7 @@ export class Agent {
         role: "user",
         text: `[Context compacted before model call at ${formatTime()} — ${dropped} older messages were dropped due to input size.]`,
       });
-      console.log(`input compacted before model call (${dropped} messages dropped)`);
+      log(`input compacted before model call (${dropped} messages dropped)`);
     }
 
     return compacted;

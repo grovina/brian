@@ -6,6 +6,7 @@ import { Agent } from "./agent.js";
 import { UpdateQueue } from "./updates.js";
 import { Slack } from "./slack.js";
 import { slackTools } from "./tools/slack.js";
+import { log } from "./logs.js";
 
 export class Brian {
   private config: BrianConfig;
@@ -21,7 +22,7 @@ export class Brian {
   async start(): Promise<void> {
     await fs.mkdir(this.stateDir, { recursive: true });
 
-    console.log("agent starting");
+    log("agent starting");
 
     if (this.config.slack) {
       this.slack = new Slack({
@@ -29,7 +30,7 @@ export class Brian {
         stateDir: this.stateDir,
       });
       this.slack.startPolling(this.updates);
-      console.log("slack polling started");
+      log("slack polling started");
     }
 
     const tools = [
@@ -45,7 +46,7 @@ export class Brian {
       updates: this.updates,
     });
 
-    console.log(`agent running with ${tools.length} tools`);
+    log(`agent running with ${tools.length} tools`);
 
     process.on("SIGINT", () => this.shutdown());
     process.on("SIGTERM", () => this.shutdown());
@@ -54,7 +55,7 @@ export class Brian {
   }
 
   private async shutdown(): Promise<void> {
-    console.log("agent shutting down");
+    log("agent shutting down");
     this.slack?.stopPolling();
     process.exit(0);
   }

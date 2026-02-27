@@ -14,6 +14,9 @@ function exec(
       env: {
         ...process.env,
         PATH: `${process.env.HOME}/.npm-global/bin:${process.env.PATH}`,
+        CLOUDSDK_CORE_DISABLE_PROMPTS:
+          process.env.CLOUDSDK_CORE_DISABLE_PROMPTS ?? "1",
+        CLOUDSDK_PAGER: process.env.CLOUDSDK_PAGER ?? "",
       },
       timeout: timeoutMs,
     });

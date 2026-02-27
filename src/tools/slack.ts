@@ -78,5 +78,59 @@ export function slackTools(slack: Slack): Tool[] {
         return `Reacted with :${emoji}:`;
       },
     },
+    {
+      name: "slack_history",
+      definition: {
+        name: "slack_history",
+        description:
+          "Read past Slack messages from a channel or thread for context. This is read-only.",
+        parameters: {
+          type: "object",
+          properties: {
+            channel_id: {
+              type: "string",
+              description: "Channel ID to read history from",
+            },
+            limit: {
+              type: "number",
+              description: "Maximum messages to return (1-100, default 30)",
+            },
+            since_ts: {
+              type: "string",
+              description:
+                "Return messages after this Slack timestamp (exclusive, e.g. 1735689600.000100)",
+            },
+            before_ts: {
+              type: "string",
+              description:
+                "Return messages before this Slack timestamp (exclusive, e.g. 1735693200.000200)",
+            },
+            thread_ts: {
+              type: "string",
+              description:
+                "If provided, read thread replies for this parent thread timestamp",
+            },
+          },
+          required: ["channel_id"],
+        },
+      },
+      async execute(input) {
+        const { channel_id, limit, since_ts, before_ts, thread_ts } = input as {
+          channel_id: string;
+          limit?: number;
+          since_ts?: string;
+          before_ts?: string;
+          thread_ts?: string;
+        };
+        const result = await slack.getHistory({
+          channelId: channel_id,
+          limit,
+          sinceTs: since_ts,
+          beforeTs: before_ts,
+          threadTs: thread_ts,
+        });
+        return result;
+      },
+    },
   ];
 }

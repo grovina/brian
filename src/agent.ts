@@ -109,12 +109,14 @@ export class Agent {
   }
 
   async loop(): Promise<never> {
-    await this.loadHistory();
+    const hasPriorHistory = await this.loadHistory();
 
     const toolDefs = this.config.tools.map((t) => t.definition);
 
     const startupUpdates = this.config.updates.drain();
-    const startupText = `[Agent started at ${formatTime()} — first turn after startup]`;
+    const startupText = hasPriorHistory
+      ? `[Agent started at ${formatTime()} — first turn after startup]`
+      : `[Agent started at ${formatTime()} — first turn after startup]\n\n[No prior conversation history was found on disk. You just arrived. Say hello in Slack and collaborate with others to understand your role, current tasks, and priorities.]`;
     this.history.push({
       role: "user",
       text:
@@ -272,7 +274,7 @@ export class Agent {
     return results;
   }
 
-  private async loadHistory(): Promise<void> {
+  private async loadHistory(): Promise<boolean> {
     try {
       const raw = await fs.readFile(
         path.join(this.config.stateDir, "history.json"),
@@ -280,8 +282,10 @@ export class Agent {
       );
       this.history = sanitizeHistory(JSON.parse(raw) as Message[]);
       log(`history restored (${this.history.length} messages)`);
+      return this.history.length > 0;
     } catch {
       log("history is empty; starting fresh conversation");
+      return false;
     }
   }
 

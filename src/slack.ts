@@ -38,11 +38,20 @@ interface SlackEventRoute {
   threadTs?: string;
 }
 
+interface SlackHistoryInput {
+  channelId: string;
+  limit?: number;
+  sinceTs?: string;
+  beforeTs?: string;
+  threadTs?: string;
+}
+
 const DEFAULT_POLL_INTERVAL_MS = 30_000;
 const MAX_IMAGE_BYTES = 1024 * 1024; // 1MB
 const MAX_SLACK_MESSAGES_PER_POLL = 120;
 const MAX_SLACK_MESSAGE_TEXT_CHARS = 500;
 const MAX_SLACK_UPDATE_CHARS = 32_000;
+const MAX_HISTORY_LOOKUP_LIMIT = 100;
 const ALLOWED_IMAGE_MIME_TYPES = new Set([
   "image/jpeg",
   "image/png",
@@ -157,6 +166,128 @@ export class Slack {
     });
   }
 
+  async getHistory(input: SlackHistoryInput): Promise<{ text: string; images?: ImageData[] }> {
+    const channelId = input.channelId?.trim();
+    if (!channelId) {
+      throw new Error("channelId is required");
+    }
+
+    const limit = Math.max(
+      1,
+      Math.min(MAX_HISTORY_LOOKUP_LIMIT, Math.floor(input.limit ?? 30))
+    );
+    const oldest = input.sinceTs?.trim() || undefined;
+    const latest = input.beforeTs?.trim() || undefined;
+    const threadTs = input.threadTs?.trim() || undefined;
+    const channelName = await this.resolveChannelName(channelId);
+
+    const fetched = threadTs
+      ? await this.client.conversations.replies({
+          channel: channelId,
+          ts: threadTs,
+          oldest,
+          latest,
+          limit,
+          inclusive: false,
+        })
+      : await this.client.conversations.history({
+          channel: channelId,
+          oldest,
+          latest,
+          limit,
+          inclusive: false,
+        });
+
+    const sourceMessages = fetched.messages ?? [];
+    const slackMessages: SlackMessage[] = [];
+    for (const msg of sourceMessages) {
+      const subtype = (msg as { subtype?: string }).subtype;
+      if (!msg.ts || !msg.text) continue;
+      if (subtype === "channel_join" || subtype === "channel_leave") continue;
+
+      const user = msg.user ?? "unknown";
+      const userName = await this.resolveUser(user);
+      const messageTs = msg.ts;
+      const normalizedThreadTs = msg.thread_ts !== msg.ts ? msg.thread_ts : undefined;
+      const eventId = this.eventId(channelId, messageTs);
+      this.eventRoutes.set(eventId, {
+        channelId,
+        messageTs,
+        threadTs: normalizedThreadTs,
+      });
+      this.pruneEventRoutes();
+
+      const attachments = await this.extractImages(msg);
+      slackMessages.push({
+        eventId,
+        user,
+        userName,
+        text: msg.text,
+        messageTs,
+        threadTs: normalizedThreadTs,
+        channelId,
+        channelName,
+        isThreadReply: Boolean(normalizedThreadTs),
+        receivedAt: new Date().toISOString(),
+        images: attachments.images,
+        attachmentNotes: attachments.notes,
+      });
+    }
+
+    const ordered = slackMessages.sort(
+      (a, b) => parseSlackTs(a.messageTs) - parseSlackTs(b.messageTs)
+    );
+    const lines: string[] = [];
+    const events: string[] = [];
+    const images: ImageData[] = [];
+    for (const msg of ordered) {
+      events.push(
+        JSON.stringify({
+          event_id: msg.eventId,
+          channel_id: msg.channelId,
+          channel_name: msg.channelName,
+          message_ts: msg.messageTs,
+          thread_ts: msg.threadTs,
+          is_thread_reply: msg.isThreadReply,
+          user_id: msg.user,
+          user_name: msg.userName,
+          text: clampMessageText(msg.text),
+          received_at: msg.receivedAt,
+        })
+      );
+
+      const time = this.formatTs(msg.messageTs);
+      const prefix = msg.threadTs ? "  ↳ " : "- ";
+      lines.push(
+        `${prefix}${msg.userName} (${time}) [event_id=${msg.eventId}]: ${clampMessageText(msg.text)}`
+      );
+
+      if (msg.images) images.push(...msg.images);
+      if (msg.attachmentNotes && msg.attachmentNotes.length > 0) {
+        for (const note of msg.attachmentNotes) {
+          lines.push(`    ${note}`);
+        }
+      }
+    }
+
+    const scopeLabel = threadTs ? `thread ${threadTs}` : `channel #${channelName}`;
+    const header = `Slack history for ${scopeLabel} (channel ${channelId}, ${ordered.length} messages)`;
+    const text = [
+      `**${header}**`,
+      "",
+      "**Slack events (JSONL):**",
+      ...events,
+      "",
+      "**Slack history:**",
+      ...lines,
+    ].join("\n");
+
+    return {
+      text,
+      images: images.length > 0 ? images : undefined,
+    };
+  }
+
   startPolling(updates: UpdateQueue): void {
     if (this.polling) return;
     this.polling = true;
@@ -197,9 +328,23 @@ export class Slack {
 
   private async poll(updates: UpdateQueue): Promise<void> {
     const channels = await this.getChannels();
+    if (channels.length === 0) return;
+
+    if (this.cursors.size === 0) {
+      for (const channel of channels) {
+        await this.seedChannelCursor(channel.id);
+      }
+      await this.saveCursors();
+      return;
+    }
+
     const newMessages: SlackMessage[] = [];
 
     for (const channel of channels) {
+      if (!this.cursors.has(channel.id)) {
+        await this.seedChannelCursor(channel.id);
+        continue;
+      }
       const messages = await this.getNewMessages(channel);
       newMessages.push(...messages);
     }
@@ -285,6 +430,25 @@ export class Slack {
     });
 
     await this.saveCursors();
+  }
+
+  private async seedChannelCursor(channelId: string): Promise<void> {
+    if (this.cursors.has(channelId)) return;
+    try {
+      const result = await this.client.conversations.history({
+        channel: channelId,
+        limit: 1,
+      });
+      const latestTs = result.messages?.[0]?.ts;
+      if (latestTs) {
+        this.cursors.set(channelId, latestTs);
+        return;
+      }
+    } catch {
+      // channel might not be accessible
+    }
+    const nowTs = (Date.now() / 1000).toFixed(6);
+    this.cursors.set(channelId, nowTs);
   }
 
   private async getChannels(): Promise<ChannelInfo[]> {
@@ -550,6 +714,19 @@ export class Slack {
       return name;
     } catch {
       return userId;
+    }
+  }
+
+  private async resolveChannelName(channelId: string): Promise<string> {
+    const cached = this.channelNames.get(channelId);
+    if (cached) return cached;
+    try {
+      const result = await this.client.conversations.info({ channel: channelId });
+      const name = result.channel?.name ?? channelId;
+      this.channelNames.set(channelId, name);
+      return name;
+    } catch {
+      return channelId;
     }
   }
 

@@ -38,7 +38,6 @@ export const waitTool: Tool = {
       minute: "2-digit",
     });
 
-    const msg = `Waited ${clamped} minutes. It's now ${now}.`;
-    return reason ? `${msg} (${reason})` : msg;
+    return `Waited ${clamped} minutes. It's now ${now}.`;
   },
 };

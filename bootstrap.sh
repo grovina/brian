@@ -313,21 +313,21 @@ put_file() {
 
 redeploy_remote() {
   local reset_state="\${1:-false}"
-  remote_cmd "sudo -u brian bash -lc '
-    set -euo pipefail
-    set -a
-    source /etc/brian/env
-    set +a
-    REPO_DIR=/home/brian/brian
-    git -C \"\$REPO_DIR\" fetch upstream --prune
-    git -C \"\$REPO_DIR\" checkout main
-    git -C \"\$REPO_DIR\" reset --hard upstream/main
-    git -C \"\$REPO_DIR\" clean -fd
-    cd \"\$REPO_DIR\"
-    npm install
-    npm run build
-    brian config check
-  '"
+  gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "sudo -u brian bash -s" <<'REMOTE_REDEPLOY'
+set -euo pipefail
+set -a
+source /etc/brian/env
+set +a
+REPO_DIR=/home/brian/brian
+git -C "$REPO_DIR" fetch upstream --prune
+git -C "$REPO_DIR" checkout main
+git -C "$REPO_DIR" reset --hard upstream/main
+git -C "$REPO_DIR" clean -fd
+cd "$REPO_DIR"
+npm install
+npm run build
+brian config check
+REMOTE_REDEPLOY
   if [[ "\$reset_state" == "true" ]]; then
     remote_cmd "sudo -u brian bash -lc 'rm -rf /home/brian/.brian && mkdir -p /home/brian/.brian/logs'"
   fi

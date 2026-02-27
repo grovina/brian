@@ -289,6 +289,28 @@ env_push() {
   echo "Env updated on VM: /etc/brian/env"
 }
 
+put_file() {
+  local src="\${1:-}"
+  local name="\${2:-}"
+  if [[ -z "\$src" || -n "\${3:-}" ]]; then
+    echo "Usage: ctl put <local-path> [remote-name]"
+    exit 1
+  fi
+  if [[ ! -f "\$src" ]]; then
+    echo "File not found: \$src"
+    exit 1
+  fi
+  if [[ -z "\$name" ]]; then
+    name="\$(basename "\$src")"
+  fi
+  name="\$(basename "\$name")"
+
+  remote_cmd "sudo -u brian mkdir -p /home/brian/.brian/inbox"
+  gcloud compute scp "\${GCP_FLAGS[@]}" "\$src" "\${VM}:/tmp/\${name}" < /dev/null > /dev/null
+  remote_cmd "sudo mv \"/tmp/\${name}\" \"/home/brian/.brian/inbox/\${name}\" && sudo chown brian:brian \"/home/brian/.brian/inbox/\${name}\" && sudo chmod 600 \"/home/brian/.brian/inbox/\${name}\""
+  echo "Uploaded to /home/brian/.brian/inbox/\${name}"
+}
+
 redeploy_remote() {
   local reset_state="\${1:-false}"
   remote_cmd "sudo -u brian bash -lc '
@@ -318,6 +340,7 @@ Usage:
   ctl status    Show brian service status
   ctl logs      Tail recent brian service logs
   ctl env       Open local env file
+  ctl put <local-path> [remote-name]
   ctl redeploy [--state]
   ctl restart
   ctl ssh       Open SSH session to VM
@@ -339,6 +362,9 @@ case "\$cmd" in
       exit 1
     fi
     env_open
+    ;;
+  put)
+    put_file "\${2:-}" "\${3:-}"
     ;;
   redeploy)
     reset_state=false
@@ -541,10 +567,8 @@ echo
 info "$(dim "day-2 commands (from your machine):")"
 info "  $CTL_FILE status"
 info "  $CTL_FILE logs"
-info "  $CTL_FILE env show"
-info "  $CTL_FILE env push"
-info "  $CTL_FILE env diff"
-info "  $CTL_FILE sync"
+info "  $CTL_FILE env"
+info "  $CTL_FILE put <local-path> [remote-name]"
 info "  $CTL_FILE redeploy"
 info "  $CTL_FILE redeploy --state"
 info "  $CTL_FILE restart"

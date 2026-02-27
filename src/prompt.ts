@@ -80,6 +80,7 @@ Keep messages concise and actionable.
 ## Memory
 
 Your state directory is ${params.stateDir}.
+Files manually uploaded by operators are placed in ${params.stateDir}/inbox.
 
 memory.md is long-term knowledge that persists across restarts. Manage it via bash. Conversation history is transient context — persist durable facts, preferences, and project context to memory.md.
 

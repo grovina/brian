@@ -133,6 +133,7 @@ export class Agent {
       const turnInput = await this.buildTurnInput(toolDefs);
 
       const startTime = Date.now();
+      log(`[turn ${turnId}] model start`);
       const response = await this.callWithRetry(turnInput, turnId);
       const durationMs = Date.now() - startTime;
 

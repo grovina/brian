@@ -81,18 +81,17 @@ function toolPrefix(turnId: number, toolId: number, toolName: string): string {
   return `[turn ${turnId}] [tool ${toolId}] ${toolName}`;
 }
 
-function formatToolResultContext(result: ToolResult): Record<string, unknown> {
+function formatToolResultLogText(result: ToolResult): string {
   if (typeof result === "string") {
-    return {
-      kind: "text",
-      text: result,
-    };
+    return result;
   }
-  return {
-    kind: "text+images",
-    text: result.text,
-    imageCount: result.images?.length ?? 0,
-  };
+
+  const imageCount = result.images?.length ?? 0;
+  if (imageCount === 0) {
+    return result.text;
+  }
+
+  return `${result.text}\n[images: ${imageCount}]`;
 }
 
 export class Agent {
@@ -258,7 +257,7 @@ export class Agent {
           const result = await tool.execute(call.args);
           results.push(result);
           const elapsedMs = Date.now() - startedAt;
-          log(`${prefix} done in ${elapsedMs}ms`, formatToolResultContext(result));
+          log(`${prefix} done in ${elapsedMs}ms`, formatToolResultLogText(result));
         }
       } catch (err) {
         const msg = `Tool error: ${formatErrorMessage(err)}`;

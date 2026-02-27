@@ -488,6 +488,7 @@ info "Copying environment to VM..."
 gcloud compute scp $GCP_FLAGS "$ENV_FILE" "${VM}:/tmp/brian.env" < /dev/null > /dev/null 2>&1
 
 info "Running setup on VM..."
+SETUP_LOG="$(mktemp -t brian-setup.XXXXXX)"
 if ! gcloud compute ssh "$VM" $GCP_FLAGS --command "
   export DEBIAN_FRONTEND=noninteractive &&
 
@@ -542,11 +543,15 @@ if ! gcloud compute ssh "$VM" $GCP_FLAGS --command "
     export BRIAN_STATE_DIR=/home/brian/.brian
     brian setup
   '
-" < /dev/null 2>&1 | sed 's/^/    /'; then
+" < /dev/null > "$SETUP_LOG" 2>&1; then
   fail "Setup failed on VM"
+  info "Setup log:"
+  sed 's/^/      /' "$SETUP_LOG"
+  rm -f "$SETUP_LOG"
   info "SSH in to debug: gcloud compute ssh $VM $GCP_FLAGS"
   exit 1
 fi
+rm -f "$SETUP_LOG"
 
 if gcloud compute ssh "$VM" $GCP_FLAGS --command "systemctl is-active brian" < /dev/null &>/dev/null; then
   ok "${BRIAN_NAME} is running"

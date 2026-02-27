@@ -4,6 +4,7 @@ import { homedir } from "os";
 import { randomUUID } from "crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
 import type { Tool } from "../types.js";
+import { shellEnv, waitForProcessCompletion } from "./process.js";
 
 const DEFAULT_TIMEOUT_SECONDS = 300;
 const DEFAULT_READ_TAIL_CHARS = 4000;
@@ -42,7 +43,6 @@ interface PersistedState {
 class TerminalSessionManager {
   private sessions = new Map<string, SessionState>();
   private procs = new Map<string, ChildProcessWithoutNullStreams>();
-  private timeoutHandles = new Map<string, NodeJS.Timeout>();
   private loaded = false;
   private readonly stateFile: string;
 
@@ -181,42 +181,28 @@ class TerminalSessionManager {
         );
       });
 
-      const timeoutHandle = setTimeout(() => {
-        if (commandState.status === "running") {
-          commandState.timedOut = true;
-          commandState.status = "timed_out";
-          proc.kill("SIGTERM");
-          setTimeout(() => {
-            if (proc.exitCode === null) {
-              proc.kill("SIGKILL");
+      void waitForProcessCompletion(proc, Math.max(1, timeoutSeconds) * 1000).then(
+        ({ exitCode, signal, timedOut }) => {
+          this.procs.delete(session.id);
+          commandState.exitCode = exitCode;
+          commandState.signal = signal;
+          commandState.timedOut = timedOut;
+          commandState.finishedAt = new Date().toISOString();
+          if (commandState.status === "running") {
+            if (timedOut) {
+              commandState.status = "timed_out";
+            } else {
+              commandState.status = signal === "SIGTERM" ? "cancelled" : "exited";
             }
-          }, 5_000);
+          }
+
+          session.lastCommand = { ...commandState };
+          delete session.activeCommand;
+          session.updatedAt = new Date().toISOString();
+          void this.persist();
+          resolve(commandState);
         }
-      }, Math.max(1, timeoutSeconds) * 1000);
-      this.timeoutHandles.set(session.id, timeoutHandle);
-
-      proc.on("close", (code, signal) => {
-        const activeTimeout = this.timeoutHandles.get(session.id);
-        if (activeTimeout) {
-          clearTimeout(activeTimeout);
-          this.timeoutHandles.delete(session.id);
-        }
-        this.procs.delete(session.id);
-
-        commandState.exitCode = code;
-        commandState.signal = signal;
-        commandState.finishedAt = new Date().toISOString();
-        if (commandState.status === "running") {
-          commandState.status = signal === "SIGTERM" ? "cancelled" : "exited";
-        }
-
-        session.lastCommand = { ...commandState };
-        delete session.activeCommand;
-        session.updatedAt = new Date().toISOString();
-        void this.persist();
-
-        resolve(commandState);
-      });
+      );
     });
   }
 
@@ -245,14 +231,7 @@ class TerminalSessionManager {
 
     const proc = spawn("bash", ["-c", command], {
       cwd: session.cwd,
-      env: {
-        ...process.env,
-        ...session.env,
-        PATH: `${process.env.HOME}/.npm-global/bin:${process.env.PATH}`,
-        CLOUDSDK_CORE_DISABLE_PROMPTS:
-          process.env.CLOUDSDK_CORE_DISABLE_PROMPTS ?? "1",
-        CLOUDSDK_PAGER: process.env.CLOUDSDK_PAGER ?? "",
-      },
+      env: shellEnv(session.env),
     });
 
     commandState.pid = proc.pid;

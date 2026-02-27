@@ -22,19 +22,27 @@ function indentBlock(text: string, spaces = 4): string {
   const prefix = " ".repeat(spaces);
   return text
     .split("\n")
-    .map((line) => `${prefix}${line}`)
+    .map((line) => (line.length > 0 ? `${prefix}${line}` : ""))
     .join("\n");
 }
 
 export function log(message: string, context?: unknown): void {
   console.log(message);
   if (typeof context === "undefined") return;
+  if (typeof context === "string") {
+    console.log(indentBlock(context));
+    return;
+  }
   console.log(indentBlock(prettyJson(context)));
 }
 
 export function logError(message: string, context?: unknown): void {
   console.error(message);
   if (typeof context === "undefined") return;
+  if (typeof context === "string") {
+    console.error(indentBlock(context));
+    return;
+  }
   console.error(indentBlock(prettyJson(context)));
 }
 

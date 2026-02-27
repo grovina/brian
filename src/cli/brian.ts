@@ -230,7 +230,7 @@ async function syncStatus(ctx: Context): Promise<string> {
     let status = `Fork status (checked ${now})`;
 
     if (behind > 0) {
-      status += `\n- Behind ${upstream}/${branch} by ${behind} commits`;
+      status += `\n- Behind ${upstream}/${branch} by ${behind} commits (you can run \`brian sync\` to catch up)`;
     }
     if (ahead > 0) {
       status += `\n- Ahead of ${upstream}/${branch} by ${ahead} commits`;

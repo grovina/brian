@@ -2,9 +2,33 @@ import fs from "fs/promises";
 import path from "path";
 import { execFile } from "child_process";
 import { promisify } from "util";
+import { cpus, totalmem } from "os";
 
 const execFileAsync = promisify(execFile);
 let cachedCapabilitiesSection: string | null | undefined;
+let cachedMachineSection: string | undefined;
+
+function formatGiB(bytes: number): string {
+  return (bytes / (1024 ** 3)).toFixed(1);
+}
+
+function classifyMachine(vcpus: number, ramGiB: number): "tiny" | "small" | "medium" | "large" {
+  if (vcpus <= 2 || ramGiB <= 4) return "tiny";
+  if (vcpus <= 4 || ramGiB <= 8) return "small";
+  if (vcpus <= 8 || ramGiB <= 16) return "medium";
+  return "large";
+}
+
+function buildMachineSection(): string {
+  if (cachedMachineSection !== undefined) return cachedMachineSection;
+
+  const vcpus = cpus().length;
+  const ramGiB = Number(formatGiB(totalmem()));
+  const machineClass = classifyMachine(vcpus, ramGiB);
+
+  cachedMachineSection = `## Machine\n\n- vCPU: ${vcpus}\n- RAM: ${ramGiB.toFixed(1)} GiB\n- Class: ${machineClass}`;
+  return cachedMachineSection;
+}
 
 async function buildCapabilitiesSection(): Promise<string | null> {
   if (cachedCapabilitiesSection !== undefined) return cachedCapabilitiesSection;
@@ -44,6 +68,7 @@ export async function buildSystemPrompt(params: {
     .readFile(path.join(params.stateDir, "memory.md"), "utf-8")
     .catch(() => "");
   const capabilitiesSection = await buildCapabilitiesSection();
+  const machineSection = buildMachineSection();
 
   const sections = [
     `You are ${params.name}, an autonomous AI coworker.
@@ -97,6 +122,7 @@ Your git author name is "${params.name}".`,
 - Working directory: ${process.cwd()}
 - State: ${params.stateDir}`,
 
+    machineSection,
     capabilitiesSection,
     memoryContent ? `## Memory\n\n${memoryContent}` : null,
   ];

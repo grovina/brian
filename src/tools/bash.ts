@@ -18,17 +18,44 @@ function exec(
           process.env.CLOUDSDK_CORE_DISABLE_PROMPTS ?? "1",
         CLOUDSDK_PAGER: process.env.CLOUDSDK_PAGER ?? "",
       },
-      timeout: timeoutMs,
     });
 
     let stdout = "";
     let stderr = "";
+    let timedOut = false;
+    let timeoutHandle: NodeJS.Timeout | null = null;
+
+    if (timeoutMs > 0) {
+      timeoutHandle = setTimeout(() => {
+        timedOut = true;
+        proc.kill("SIGTERM");
+        setTimeout(() => {
+          if (proc.exitCode === null) {
+            proc.kill("SIGKILL");
+          }
+        }, 5_000);
+      }, timeoutMs);
+    }
 
     proc.stdout.on("data", (data) => (stdout += data.toString()));
     proc.stderr.on("data", (data) => (stderr += data.toString()));
 
-    proc.on("close", (code) => {
+    proc.on("close", (code, signal) => {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
       const output = [stdout, stderr].filter(Boolean).join("\n");
+      if (timedOut) {
+        const seconds = Math.max(1, Math.round(timeoutMs / 1000));
+        resolve(
+          `Timed out after ${seconds}s (signal: ${signal ?? "SIGTERM"})\n${output || "(no output)"}`
+        );
+        return;
+      }
+      if (signal) {
+        resolve(`Terminated by signal ${signal}\n${output || "(no output)"}`);
+        return;
+      }
       if (code !== 0) {
         resolve(`Exit code ${code}\n${output}`);
       } else {

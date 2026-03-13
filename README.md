@@ -4,11 +4,11 @@ Brian is a framework for autonomous AI coworkers. Not a chatbot — a persistent
 
 ## Philosophy
 
-Brian operates as a **single eternal turn**. There are no wake/sleep cycles, no scheduled jobs, no event-driven triggers. The agent runs one continuous loop: think, act, repeat. When there's nothing to do, it calls `wait` — a tool like any other — and resumes when the wait is over. Process restarts are just blips; the conversation picks up where it left off.
+Brian operates as a **single eternal turn**. There are no wake/sleep cycles, no scheduled jobs, no event-driven triggers. The agent runs one continuous loop: think, act, repeat. When there's nothing to do, it calls `wait` — a tool like any other — and resumes when the wait is over or when an external event arrives. Process restarts are just blips; the conversation picks up where it left off.
 
 Each brian runs from **its own fork** of this repo on its own VM. It can read and modify its own code, open PRs, and redeploy itself. The fork is the deployment unit — not a read-only dependency.
 
-Instance-specific state (memory, conversation history, credentials) lives in `~/.brian/` on the VM, outside the repo. The repo stays org-agnostic; no merge conflicts when syncing upstream.
+Instance-specific state (consciousness, conversation history, credentials) lives in `~/.brian/` on the VM, outside the repo. The repo stays org-agnostic; no merge conflicts when syncing upstream.
 
 Brian communicates with humans and other brians via **Slack**, and works with code via **GitHub** (through `gh`). It has full shell access and can install and use any headless CLI tool on its VM.
 
@@ -28,8 +28,7 @@ src/
 ├── brian.ts              # Brian class — orchestrates agent + integrations
 ├── agent.ts              # The loop: think → act → observe → repeat
 ├── types.ts              # Core interfaces (Message, Tool, ModelProvider)
-├── prompt.ts             # System prompt builder
-├── memory.ts             # memory.md access
+├── prompt.ts             # System prompt builder + consciousness reader
 ├── turns.ts              # Turn snapshots (one file per model call)
 ├── updates.ts            # External event queue (drained at control points)
 ├── slack.ts              # Slack polling and message routing
@@ -39,7 +38,7 @@ src/
 │   └── anthropic.ts      # Anthropic (Claude)
 ├── tools/
 │   ├── bash.ts           # Shell execution
-│   ├── wait.ts           # Pause execution (agent-controlled pacing)
+│   ├── wait.ts           # Pause execution (update-aware, with wait_until)
 │   └── slack.ts          # Send messages and reactions
 └── cli/
     └── brian.ts           # brian CLI (setup, redeploy, sync, doctor)
@@ -49,7 +48,7 @@ src/
 
 `Agent.loop()` is `Promise<never>` — it literally never returns. Each iteration:
 
-1. Build the turn input (system prompt + conversation history + tools)
+1. Build the turn input (system prompt + consciousness files + conversation history + tools)
 2. Call the model
 3. If tool calls: execute them, drain any queued external updates, push results back
 4. If no tool calls: inject a time marker or pending updates
@@ -59,13 +58,41 @@ src/
 
 The model always has something to respond to. External events (Slack messages) queue up and get injected at natural control points — after tool execution. The agent never misses anything; it just processes updates when it's ready.
 
-When the conversation window exceeds its limit, older messages are dropped and a compaction marker is injected so the model knows context was lost. Long-term knowledge persists in `memory.md` — the model is responsible for keeping it current.
+When the conversation window exceeds its limit, older messages are dropped and a compaction marker is injected so the model knows context was lost. Long-term knowledge persists in consciousness files (`mind/`) — the model is responsible for keeping them current.
+
+### Consciousness
+
+Brian's durable self-knowledge lives in `~/.brian/mind/` — a set of markdown files the agent maintains:
+
+```text
+~/.brian/mind/
+├── identity.md          # Who I am, my style, my boundaries
+├── relationships.md     # Model of each person and how we work together
+├── operations.md        # Autonomy levels, behavioral patterns, self-imposed rules
+├── projects/            # One file per active project with context and status
+├── learnings.md         # Technical knowledge, corrections, verified facts
+└── journal.md           # Reflections, decisions, open questions
+```
+
+Consciousness files are read into the system prompt on every turn, giving the agent persistent self-knowledge across conversation compactions and process restarts. The agent maintains these files via bash and is encouraged to git-track the directory for versioning and crash recovery.
+
+The key distinction: conversation history is transient context (compacted when it grows too large). Consciousness is durable identity (persists as long as the files exist).
+
+### Progressive Autonomy
+
+Brian's `operations.md` defines a living autonomy contract — what the agent can do freely, what it should mention, and what requires approval. The agent starts conservative and evolves boundaries collaboratively through interactions. This replaces hard-coded permission rules with a self-maintained, human-inspectable, version-trackable social contract.
 
 ### State
 
 ```text
 ~/.brian/
-├── memory.md              # Long-term knowledge (agent-managed via bash)
+├── mind/                  # Consciousness (durable, git-backed)
+│   ├── identity.md
+│   ├── relationships.md
+│   ├── operations.md
+│   ├── projects/
+│   ├── learnings.md
+│   └── journal.md
 ├── history.json           # Current conversation window (checkpoint for restarts)
 ├── slack.json             # Slack polling state
 └── turns/                 # One JSON file per model call (observability/debugging)
@@ -77,8 +104,10 @@ When the conversation window exceeds its limit, older messages are dropped and a
 Brian's tool system is minimal:
 
 - **`bash`** — Shell execution. This is the primary way brian interacts with the world: git, gh, docker, node, file manipulation, CLI tools.
-- **`wait`** — Pause for N minutes. The agent decides when and how long to wait based on context. No scheduler, no cron — just a tool call.
-- **`slack_send` / `slack_react`** — Send messages and reactions. Routing metadata from incoming events enables threaded replies.
+- **`terminal`** — Persistent terminal sessions for long-running commands, background work, and parallel execution.
+- **`wait`** — Pause for N minutes. Resumes early if an external event arrives. The agent decides when and how long to wait based on context.
+- **`wait_until`** — Pause until a specific datetime. Also resumes early on events. Useful for scheduling around known times.
+- **`slack_send` / `slack_react` / `slack_history`** — Send messages, add reactions, read history. Routing metadata from incoming events enables threaded replies.
 
 ### Model Providers
 

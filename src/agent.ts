@@ -306,7 +306,7 @@ export class Agent {
 
     this.history.unshift({
       role: "user",
-      text: `[Context compacted at ${formatTime()} — ${dropped} older messages were dropped. Long-term knowledge is in memory.md.]`,
+      text: `[Context compacted at ${formatTime()} — ${dropped} older messages were dropped. Durable knowledge is in mind/.]`,
     });
   }
 

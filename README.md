@@ -18,7 +18,7 @@ Brian communicates with humans and other brians via **Slack**, and works with co
 curl -fsSL https://raw.githubusercontent.com/grovina/brian/main/bootstrap.sh | bash
 ```
 
-The bootstrap script forks this repo to your org, deploys the fork to a GCP VM, and runs `brian setup` to initialize everything.
+The bootstrap script forks this repo to your org, deploys the fork to a GCP VM, and starts the service. It also generates a `ctl` script on your machine for emergency operations.
 
 ## Architecture
 
@@ -36,12 +36,10 @@ src/
 ├── models/
 │   ├── vertex-ai.ts      # Google Vertex AI (Gemini)
 │   └── anthropic.ts      # Anthropic (Claude)
-├── tools/
-│   ├── bash.ts           # Shell execution
-│   ├── wait.ts           # Pause execution (update-aware, with wait_until)
-│   └── slack.ts          # Send messages and reactions
-└── cli/
-    └── brian.ts           # brian CLI (setup, redeploy, sync, doctor)
+└── tools/
+    ├── bash.ts           # Shell execution
+    ├── wait.ts           # Pause execution (update-aware, with wait_until)
+    └── slack.ts          # Send messages and reactions
 ```
 
 ### The Loop
@@ -82,6 +80,14 @@ The key distinction: conversation history is transient context (compacted when i
 
 Brian's `operations.md` defines a living autonomy contract — what the agent can do freely, what it should mention, and what requires approval. The agent starts conservative and evolves boundaries collaboratively through interactions. This replaces hard-coded permission rules with a self-maintained, human-inspectable, version-trackable social contract.
 
+### Startup Awareness
+
+The agent distinguishes three startup scenarios:
+
+- **Normal restart** (has history + consciousness): Process restart. Resume from prior conversation.
+- **Recovery** (no history, has consciousness): VM was recreated, consciousness restored from git. Review journal and projects, check Slack for missed context.
+- **First run** (no history, no consciousness): Brand new agent. Create consciousness files, introduce itself on Slack.
+
 ### State
 
 ```text
@@ -118,17 +124,27 @@ Implements `ModelProvider` to abstract LLM backends:
 
 Selected at runtime via `MODEL_PROVIDER` env var.
 
-### CLI
+## Management
+
+**The agent is the management interface.** Day-to-day operations happen through Slack:
+
+- Ask the agent to check its health, sync with upstream, or redeploy
+- The agent manages itself via bash — pull, build, restart, git operations
+- Status updates, health reports, and questions flow through Slack naturally
+
+**The `ctl` script is for emergencies** — when the agent can't manage itself:
 
 ```bash
-brian setup                 # Initialize state and install systemd service
-brian redeploy              # Pull, build, restart (with rollback on failure)
-brian config check          # Validate config and model connectivity
-brian doctor                # Full health check
-brian sync                  # Sync fork with upstream (fast-forward)
-brian sync --force          # Force-align fork to upstream
-brian sync --check          # Check fork status only
+ctl status    # Is the service running?
+ctl logs      # What happened?
+ctl restart   # Restart the service
+ctl ssh       # Shell into the VM
+ctl env       # Edit local env file
+ctl env push  # Push env to VM and restart
+ctl destroy   # Delete the VM
 ```
+
+The ctl script is generated per-agent by the bootstrap script at `~/.brian/{org}.{name}.ctl`.
 
 ## How Contributions Flow
 
@@ -155,7 +171,6 @@ Environment variables (typically in `/etc/brian/env`):
 | `ANTHROPIC_API_KEY` | For Anthropic | API key |
 | `SLACK_TOKEN` | No | Slack user token (`xoxp-...`) |
 | `BRIAN_STATE_DIR` | No | State directory (default: `~/.brian`) |
-| `BRIAN_REPO_DIR` | No | Repo directory (default: auto-detected) |
 
 Setup guides: [Vertex AI](docs/vertex-ai-setup.md) · [Anthropic](docs/anthropic-setup.md) · [Slack](docs/slack-setup.md) · [GitHub](docs/github-setup.md)
 

@@ -168,10 +168,13 @@ Use bash for short, one-shot commands. Use terminal sessions for long-running co
 
 When using bash or terminal run actions, set timeout_seconds intentionally based on expected command duration.
 
-You can use the brian CLI for runtime maintenance:
-  brian doctor               Full health check
-  brian sync                 Sync fork with upstream
-  brian redeploy             Pull, build, restart
+## Self-Management
+
+You manage your own runtime. Your code lives in your repo directory and runs as a systemd service.
+
+To update yourself: pull changes, install dependencies, build, and restart the service. Verify the build succeeds before restarting. If something goes wrong, revert and restart.
+
+To sync with upstream: fetch from the upstream remote and merge. Your repo is a fork — upstream improvements benefit you, and your improvements can be pushed back via PRs.
 
 ## Knowledge
 

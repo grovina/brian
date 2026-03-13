@@ -246,7 +246,7 @@ if (( ${#MISSING[@]} > 0 )); then
   exit 1
 fi
 
-# Create local control helper for this bot
+# Create local ctl helper for this bot
 CTL_FILE=~/.brian/${GITHUB_ORG}.${BRIAN_NAME}.ctl
 cat > "$CTL_FILE" <<EOF
 #!/bin/bash
@@ -268,81 +268,14 @@ remote_cmd() {
   gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "\$1" < /dev/null
 }
 
-env_open() {
-  if [[ "\$(uname)" == "Darwin" ]]; then
-    open -t "\$ENV_FILE" < /dev/null
-  elif command -v xdg-open &>/dev/null; then
-    xdg-open "\$ENV_FILE" < /dev/null 2>/dev/null || true
-  elif [[ -n "\${EDITOR:-}" ]]; then
-    "\$EDITOR" "\$ENV_FILE"
-  elif command -v nano &>/dev/null; then
-    nano "\$ENV_FILE"
-  else
-    vi "\$ENV_FILE"
-  fi
-}
-
-env_push() {
-  echo "Pushing env to VM..."
-  gcloud compute scp "\${GCP_FLAGS[@]}" "\$ENV_FILE" "\${VM}:/tmp/brian.env" < /dev/null > /dev/null
-  remote_cmd "sudo mkdir -p /etc/brian && sudo mv /tmp/brian.env /etc/brian/env && sudo chown brian:brian /etc/brian/env && sudo chmod 600 /etc/brian/env"
-  echo "Env updated on VM: /etc/brian/env"
-}
-
-put_file() {
-  local src="\${1:-}"
-  local name="\${2:-}"
-  if [[ -z "\$src" || -n "\${3:-}" ]]; then
-    echo "Usage: ctl put <local-path> [remote-name]"
-    exit 1
-  fi
-  if [[ ! -f "\$src" ]]; then
-    echo "File not found: \$src"
-    exit 1
-  fi
-  if [[ -z "\$name" ]]; then
-    name="\$(basename "\$src")"
-  fi
-  name="\$(basename "\$name")"
-
-  remote_cmd "sudo -u brian mkdir -p /home/brian/.brian/inbox"
-  gcloud compute scp "\${GCP_FLAGS[@]}" "\$src" "\${VM}:/tmp/\${name}" < /dev/null > /dev/null
-  remote_cmd "sudo mv \"/tmp/\${name}\" \"/home/brian/.brian/inbox/\${name}\" && sudo chown brian:brian \"/home/brian/.brian/inbox/\${name}\" && sudo chmod 600 \"/home/brian/.brian/inbox/\${name}\""
-  echo "Uploaded to /home/brian/.brian/inbox/\${name}"
-}
-
-redeploy_remote() {
-  local reset_state="\${1:-false}"
-  gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "sudo -u brian bash -s" <<'REMOTE_REDEPLOY'
-set -euo pipefail
-set -a
-source /etc/brian/env
-set +a
-REPO_DIR=/home/brian/brian
-git -C "$REPO_DIR" fetch upstream --prune
-git -C "$REPO_DIR" checkout main
-git -C "$REPO_DIR" reset --hard upstream/main
-git -C "$REPO_DIR" clean -fd
-cd "$REPO_DIR"
-npm install
-npm run build
-brian config check
-REMOTE_REDEPLOY
-  if [[ "\$reset_state" == "true" ]]; then
-    remote_cmd "sudo -u brian bash -lc 'rm -rf /home/brian/.brian && mkdir -p /home/brian/.brian/logs'"
-  fi
-  remote_cmd "sudo systemctl restart brian && systemctl is-active brian"
-}
-
 usage() {
   cat <<'USAGE'
 Usage:
-  ctl status    Show brian service status
-  ctl logs      Tail recent brian service logs
-  ctl env       Open local env file
-  ctl put <local-path> [remote-name]
-  ctl redeploy [--state]
-  ctl restart
+  ctl status    Show service status
+  ctl logs      Tail service logs
+  ctl env       Open local env file for editing
+  ctl env push  Push env to VM and restart
+  ctl restart   Restart the service
   ctl ssh       Open SSH session to VM
   ctl destroy   Delete VM (destructive)
 USAGE
@@ -351,45 +284,34 @@ USAGE
 cmd="\${1:-help}"
 case "\$cmd" in
   status)
-    remote_cmd "systemctl is-active brian; echo '---'; sudo -u brian -H brian sync --check"
+    remote_cmd "systemctl is-active brian && echo 'running' || echo 'stopped'; echo '---'; journalctl -u brian -n 5 --no-pager -o short-iso 2>/dev/null"
     ;;
   logs)
     gcloud compute ssh "\$VM" "\${GCP_FLAGS[@]}" --command "journalctl -u brian -n 200 -f --no-pager" < /dev/null
     ;;
   env)
-    if [[ -n "\${2:-}" ]]; then
-      echo "Usage: ctl env"
-      exit 1
-    fi
-    env_open
-    ;;
-  put)
-    put_file "\${2:-}" "\${3:-}"
-    ;;
-  redeploy)
-    reset_state=false
-    if [[ "\${2:-}" == "--state" ]]; then
-      echo "This will fully reset /home/brian/.brian for '\$VM' after redeploy."
-      printf "Type RESET to confirm: "
-      read -r confirm < /dev/tty
-      if [[ "\$confirm" != "RESET" ]]; then
-        echo "Aborted."
-        exit 1
-      fi
-      reset_state=true
+    if [[ "\${2:-}" == "push" ]]; then
+      echo "Pushing env to VM..."
+      gcloud compute scp "\${GCP_FLAGS[@]}" "\$ENV_FILE" "\${VM}:/tmp/brian.env" < /dev/null > /dev/null
+      remote_cmd "sudo mkdir -p /etc/brian && sudo mv /tmp/brian.env /etc/brian/env && sudo chown brian:brian /etc/brian/env && sudo chmod 600 /etc/brian/env"
+      echo "Env updated. Restarting..."
+      remote_cmd "sudo systemctl restart brian && systemctl is-active brian"
     elif [[ -n "\${2:-}" ]]; then
-      echo "Usage: ctl redeploy [--state]"
+      echo "Usage: ctl env [push]"
       exit 1
+    else
+      if [[ "\$(uname)" == "Darwin" ]]; then
+        open -t "\$ENV_FILE" < /dev/null
+      elif command -v xdg-open &>/dev/null; then
+        xdg-open "\$ENV_FILE" < /dev/null 2>/dev/null || true
+      elif [[ -n "\${EDITOR:-}" ]]; then
+        "\$EDITOR" "\$ENV_FILE"
+      else
+        vi "\$ENV_FILE"
+      fi
     fi
-
-    env_push
-    redeploy_remote "\$reset_state"
     ;;
   restart)
-    if [[ -n "\${2:-}" ]]; then
-      echo "Usage: ctl restart"
-      exit 1
-    fi
     remote_cmd "sudo systemctl restart brian && systemctl is-active brian"
     ;;
   ssh)
@@ -531,18 +453,38 @@ if ! gcloud compute ssh "$VM" $GCP_FLAGS --command "
   fi &&
   sudo -u brian bash -c \"cd \$REPO_DIR && npm install --silent && npm run build --silent\" &&
 
-  # Install brian CLI
-  sudo ln -sf \"\$REPO_DIR/dist/cli/brian.js\" /usr/local/bin/brian &&
+  # Add upstream remote for syncing
+  sudo -u brian git -C \"\$REPO_DIR\" remote get-url upstream &>/dev/null ||
+    sudo -u brian git -C \"\$REPO_DIR\" remote add upstream https://github.com/grovina/brian.git &&
 
-  # Initialize + modules + service
-  sudo -u brian bash -c '
-    set -a
-    source /etc/brian/env
-    set +a
-    export BRIAN_REPO_DIR=/home/brian/brian
-    export BRIAN_STATE_DIR=/home/brian/.brian
-    brian setup
-  '
+  # State directory
+  sudo -u brian mkdir -p /home/brian/.brian/mind/projects &&
+  sudo -u brian mkdir -p /home/brian/.brian/logs &&
+
+  # Systemd service
+  cat > /tmp/brian.service <<UNIT
+[Unit]
+Description=\${BRIAN_NAME}
+After=network.target
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+[Service]
+Type=simple
+User=brian
+WorkingDirectory=\${REPO_DIR}
+EnvironmentFile=/etc/brian/env
+ExecStart=/usr/bin/node dist/start.js
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  sudo mv /tmp/brian.service /etc/systemd/system/brian.service &&
+  sudo systemctl daemon-reload &&
+  sudo systemctl enable brian &&
+  sudo systemctl restart brian
 " < /dev/null > "$SETUP_LOG" 2>&1; then
   fail "Setup failed on VM"
   info "Setup log:"
@@ -553,6 +495,8 @@ if ! gcloud compute ssh "$VM" $GCP_FLAGS --command "
 fi
 rm -f "$SETUP_LOG"
 
+# Verify
+sleep 10
 if gcloud compute ssh "$VM" $GCP_FLAGS --command "systemctl is-active brian" < /dev/null &>/dev/null; then
   ok "${BRIAN_NAME} is running"
 else
@@ -569,14 +513,13 @@ step "Done!"
 echo
 info "$(bold "$BRIAN_NAME") is running on GCP."
 echo
-info "$(dim "day-2 commands (from your machine):")"
+info "$(dim "emergency commands (from your machine):")"
 info "  $CTL_FILE status"
 info "  $CTL_FILE logs"
-info "  $CTL_FILE env"
-info "  $CTL_FILE put <local-path> [remote-name]"
-info "  $CTL_FILE redeploy"
-info "  $CTL_FILE redeploy --state"
+info "  $CTL_FILE env [push]"
 info "  $CTL_FILE restart"
 info "  $CTL_FILE ssh"
 info "  $CTL_FILE destroy"
+echo
+info "$(dim "day-to-day management: talk to ${BRIAN_NAME} on Slack")"
 echo

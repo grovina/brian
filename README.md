@@ -38,7 +38,7 @@ src/
 │   └── anthropic.ts      # Anthropic (Claude)
 └── tools/
     ├── bash.ts           # Shell execution
-    ├── wait.ts           # Pause execution (update-aware, with wait_until)
+    ├── wait.ts           # Pause execution (update-aware, duration or datetime)
     └── slack.ts          # Send messages and reactions
 ```
 
@@ -111,8 +111,7 @@ Brian's tool system is minimal:
 
 - **`bash`** — Shell execution. This is the primary way brian interacts with the world: git, gh, docker, node, file manipulation, CLI tools.
 - **`terminal`** — Persistent terminal sessions for long-running commands, background work, and parallel execution.
-- **`wait`** — Pause for N minutes. Resumes early if an external event arrives. The agent decides when and how long to wait based on context.
-- **`wait_until`** — Pause until a specific datetime. Also resumes early on events. Useful for scheduling around known times.
+- **`wait`** — Pause execution. Accepts a duration (minutes), a target datetime, or both — whichever comes first ends the wait. Resumes early if an external event arrives.
 - **`slack_send` / `slack_react` / `slack_history`** — Send messages, add reactions, read history. Routing metadata from incoming events enables threaded replies.
 
 ### Model Providers

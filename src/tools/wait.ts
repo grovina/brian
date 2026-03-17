@@ -20,7 +20,7 @@ export function createWaitTools(updates: UpdateQueue): Tool[] {
       definition: {
         name: "wait",
         description:
-          "Pause execution. Specify duration (minutes) or target time (datetime), or both. Resumes early if an external event arrives. Whichever condition is met first ends the wait.",
+          "Pause execution. Specify any combination of conditions — the wait ends when the first one is met. Use minutes for a duration, datetime for a target time, and wake_on_events to resume when an external event (e.g. Slack message) arrives.",
         parameters: {
           type: "object",
           properties: {
@@ -32,6 +32,10 @@ export function createWaitTools(updates: UpdateQueue): Tool[] {
               type: "string",
               description: "ISO 8601 datetime to wait until (e.g. 2025-03-14T09:00:00Z)",
             },
+            wake_on_events: {
+              type: "boolean",
+              description: "If true, resume early when an external event arrives",
+            },
             reason: {
               type: "string",
               description: "Why waiting is appropriate right now",
@@ -40,9 +44,10 @@ export function createWaitTools(updates: UpdateQueue): Tool[] {
         },
       },
       async execute(input) {
-        const { minutes, datetime, reason } = input as {
+        const { minutes, datetime, wake_on_events, reason } = input as {
           minutes?: number;
           datetime?: string;
+          wake_on_events?: boolean;
           reason?: string;
         };
 
@@ -64,16 +69,22 @@ export function createWaitTools(updates: UpdateQueue): Tool[] {
           }
         }
 
-        if (waitMs === undefined || waitMs <= 0) {
-          return `No valid wait condition provided. It's now ${formatNow()}.`;
+        if (waitMs === undefined && !wake_on_events) {
+          return `No wait condition provided. It's now ${formatNow()}.`;
         }
 
-        const wokeEarly = await updates.waitForUpdate(waitMs);
-        const now = formatNow();
+        const effectiveMs = waitMs ?? MAX_WAIT_MS;
 
-        return wokeEarly
-          ? `Resumed early — update arrived. It's now ${now}.`
-          : `Wait complete. It's now ${now}.`;
+        if (wake_on_events) {
+          const wokeEarly = await updates.waitForUpdate(effectiveMs);
+          const now = formatNow();
+          return wokeEarly
+            ? `Resumed — event arrived. It's now ${now}.`
+            : `Wait complete (no events). It's now ${now}.`;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, effectiveMs));
+        return `Wait complete. It's now ${formatNow()}.`;
       },
     },
   ];

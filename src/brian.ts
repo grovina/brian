@@ -6,6 +6,7 @@ import { Agent } from "./agent.js";
 import { UpdateQueue } from "./updates.js";
 import { Slack } from "./slack.js";
 import { slackTools } from "./tools/slack.js";
+import { createWaitTools } from "./tools/wait.js";
 import { log } from "./logs.js";
 
 export class Brian {
@@ -21,6 +22,7 @@ export class Brian {
 
   async start(): Promise<void> {
     await fs.mkdir(this.stateDir, { recursive: true });
+    await fs.mkdir(path.join(this.stateDir, "mind", "projects"), { recursive: true });
 
     log("agent starting");
 
@@ -35,6 +37,7 @@ export class Brian {
 
     const tools = [
       ...(this.config.tools ?? []),
+      ...createWaitTools(this.updates),
       ...(this.slack ? slackTools(this.slack) : []),
     ];
 

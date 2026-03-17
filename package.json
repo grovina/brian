@@ -3,11 +3,8 @@
   "version": "0.1.0",
   "description": "Framework for autonomous AI coworkers",
   "type": "module",
-  "bin": {
-    "brian": "./dist/cli/brian.js"
-  },
   "scripts": {
-    "build": "tsc && chmod +x dist/cli/brian.js",
+    "build": "tsc",
     "start": "node --env-file=.env dist/start.js",
     "typecheck": "tsc --noEmit"
   },

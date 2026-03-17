@@ -33,12 +33,3 @@ export async function createModel(): Promise<ModelProvider> {
     `Unsupported MODEL_PROVIDER: ${provider}. Expected 'vertex-ai' or 'anthropic'.`
   );
 }
-
-export async function checkModelConfig(): Promise<void> {
-  const model = await createModel();
-  await model.generate({
-    systemPrompt: "Health check. Reply briefly.",
-    messages: [{ role: "user", text: "Reply with OK." }],
-    tools: [],
-  });
-}

@@ -109,13 +109,12 @@ export class Agent {
 
   async loop(): Promise<never> {
     const hasPriorHistory = await this.loadHistory();
+    const hasConsciousness = await this.hasConsciousnessFiles();
 
     const toolDefs = this.config.tools.map((t) => t.definition);
 
     const startupUpdates = this.config.updates.drain();
-    const startupText = hasPriorHistory
-      ? `[Agent started at ${formatTime()} — first turn after startup]`
-      : `[Agent started at ${formatTime()} — first turn after startup]\n\n[No prior conversation history was found on disk. You just arrived. Say hello in Slack and collaborate with others to understand your role, current tasks, and priorities.]`;
+    const startupText = this.buildStartupMessage(hasPriorHistory, hasConsciousness);
     this.history.push({
       role: "user",
       text:
@@ -306,7 +305,7 @@ export class Agent {
 
     this.history.unshift({
       role: "user",
-      text: `[Context compacted at ${formatTime()} — ${dropped} older messages were dropped. Long-term knowledge is in memory.md.]`,
+      text: `[Context compacted at ${formatTime()} — ${dropped} older messages were dropped. Check that anything important from the dropped context has been persisted to mind/.]`,
     });
   }
 
@@ -346,5 +345,29 @@ export class Agent {
     }
 
     return compacted;
+  }
+
+  private async hasConsciousnessFiles(): Promise<boolean> {
+    const mindDir = path.join(this.config.stateDir, "mind");
+    try {
+      const entries = await fs.readdir(mindDir);
+      return entries.some((e) => e.endsWith(".md"));
+    } catch {
+      return false;
+    }
+  }
+
+  private buildStartupMessage(hasPriorHistory: boolean, hasConsciousness: boolean): string {
+    const time = formatTime();
+
+    if (hasPriorHistory) {
+      return `[Agent restarted at ${time} — resuming from prior conversation]`;
+    }
+
+    if (hasConsciousness) {
+      return `[Agent started at ${time} — no conversation history, but consciousness files are present]\n\n[You've been restarted on a fresh context. Your mind/ files contain your identity and knowledge. Review your journal and projects to orient yourself, then check Slack for anything you missed.]`;
+    }
+
+    return `[Agent started at ${time} — first run, no history or consciousness]\n\n[You're starting fresh. Create your consciousness files in mind/ (identity.md, relationships.md, operations.md, learnings.md, journal.md), then introduce yourself on Slack and collaborate to understand your role and priorities.]`;
   }
 }
